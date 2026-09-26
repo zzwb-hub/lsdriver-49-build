@@ -3,7 +3,7 @@ name: build-lsdriver-4.9
 # 为一加6（enchilada，氢OS Android 10，内核 4.9.179-perf+）云编译 lsdriver.ko
 # 手动触发：GitHub 网页 → Actions → build-lsdriver-4.9 → Run workflow
 
-on:
+"on":
   workflow_dispatch:
     inputs:
       localversion:
