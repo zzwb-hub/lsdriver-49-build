@@ -99,7 +99,7 @@ jobs:
           # OnePlusOSS 公开树坑：显示/GPU/多媒体驱动缺大量头文件，且对逆向模块完全无关，批量禁用
           scripts/config --disable QCOM_MDSS_PLL || true
           scripts/config --disable DRM_MSM || true
-          scripts/config --disable KGSL || true
+          scripts/config --disable QCOM_KGSL || true
           scripts/config --disable MSM_MDSS || true
           scripts/config --disable FB_MSM || true
           scripts/config --disable MSM_CAMERA || true
