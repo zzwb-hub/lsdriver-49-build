@@ -83,6 +83,7 @@ jobs:
             'static inline int opc_select_path(struct task_struct *cur, struct task_struct *p, int prev_cpu) { return -1; }' \
             'static inline int opc_get_claim_on_cpu(int cpu) { return 0; }' \
             'static __maybe_unused int *opc_boost_tl = 0;' \
+            'static inline void opc_binder_pass(size_t size, void *kptr, int dir) {}' \
             '#endif' \
             > drivers/oneplus/coretech/uxcore/opchain_helper.h
 
