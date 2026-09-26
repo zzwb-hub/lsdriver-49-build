@@ -69,17 +69,21 @@ jobs:
           make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- LOCALVERSION="${{ inputs.localversion }}" modules_prepare
 
       # sdm845-perf_defconfig 已确认 MODVERSIONS=y：模块必须带符号 CRC，需要整树编出 Module.symvers
+      # CC 直指交叉 gcc，绕过 gcc-wrapper.py——它把 GCC11 的新警告强制升级为错误（forbidden warning），
+      # 我们只要 Module.symvers/CRC，不刷这个内核，警告无害
       - name: Full kernel build (only when MODVERSIONS=y)
         if: env.MODVERSIONS == 'y'
         run: |
           cd kernel
           # gcc10+ 默认 -fno-common，4.9 自带 dtc 的 yylloc 会多重定义，host 端加 -fcommon
-          make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- HOSTCFLAGS="-fcommon" \
+          make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CC=aarch64-linux-gnu-gcc \
+            HOSTCFLAGS="-fcommon" \
             LOCALVERSION="${{ inputs.localversion }}" -j"$(nproc)"
 
       - name: Build lsdriver.ko
         run: |
           make -C kernel M="$PWD/lsdriver" ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \
+            CC=aarch64-linux-gnu-gcc \
             LOCALVERSION="${{ inputs.localversion }}" modules
 
       - name: Show vermagic
