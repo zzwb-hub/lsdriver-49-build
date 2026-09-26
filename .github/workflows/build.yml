@@ -52,6 +52,15 @@ jobs:
               echo "stubbed: $f"
             fi
           done
+          # fair.c 等内核文件无条件 include drivers/oneplus/ 下的头文件，批量补空头文件
+          grep -rhoP '#include\s*[<"]\K(\.\./)*drivers/oneplus/[^">]+\.h' --include='*.c' --include='*.h' . \
+            | sed 's|^\(\.\./\)*||' | sort -u | while read -r f; do
+            if [ ! -f "$f" ]; then
+              mkdir -p "$(dirname "$f")"
+              echo '/* stub: missing in OnePlusOSS release */' > "$f"
+              echo "stubbed header: $f"
+            fi
+          done
 
       - name: Configure kernel (sdm845-perf_defconfig)
         run: |
