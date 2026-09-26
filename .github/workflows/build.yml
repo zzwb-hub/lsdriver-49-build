@@ -96,6 +96,8 @@ jobs:
           # OnePlusOSS 公开树坑：BTFM_SLIM 默认随 MSM_BT_POWER 打开，但 <btfm_slim.h> 缺 include 路径，编不过。
           # 我们只要 Module.symvers 的 CRC，蓝牙驱动无关，直接关掉
           scripts/config --disable BTFM_SLIM --disable BTFM_SLIM_WCN3990 || true
+          # OnePlusOSS 公开树坑：mdss_pll_trace.h 双引号 include 在 CI 环境找不到，禁用显示时钟 PLL
+          scripts/config --disable QCOM_MDSS_PLL || true
           make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- olddefconfig
           grep -q '^CONFIG_MODVERSIONS=y' .config && echo "MODVERSIONS=y" >> "$GITHUB_ENV" || echo "MODVERSIONS=n" >> "$GITHUB_ENV"
 
