@@ -1,0 +1,69 @@
+name: build-lsdriver-4.9
+
+# 为一加6（enchilada，氢OS Android 10，内核 4.9.179）云编译 lsdriver.ko
+# 手动触发：GitHub 网页 → Actions → build-lsdriver-4.9 → Run workflow
+
+on:
+  workflow_dispatch:
+    inputs:
+      localversion:
+        description: 'LOCALVERSION 后缀，对齐手机 adb shell uname -r 的后缀（如 -perf+），无后缀留空'
+        required: false
+        default: ''
+
+env:
+  KERNEL_REPO: https://github.com/OnePlusOSS/android_kernel_oneplus_sdm845.git
+  KERNEL_BRANCH: oneplus/SDM845_Q_10.0
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout lsdriver source
+        uses: actions/checkout@v4
+
+      - name: Install build deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential bc bison flex libssl-dev \
+            gcc-aarch64-linux-gnu device-tree-compiler
+
+      - name: Clone OnePlus 4.9 kernel (shallow)
+        run: git clone --depth 1 --branch "${{ env.KERNEL_BRANCH }}" "${{ env.KERNEL_REPO }}" kernel
+
+      - name: Configure kernel (enchilada_defconfig)
+        run: |
+          cd kernel
+          make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- enchilada_defconfig
+          # 关掉 SCM 自动版本后缀，保证 vermagic 只由 LOCALVERSION 输入控制，结果可复现
+          scripts/config --disable LOCALVERSION_AUTO || true
+          make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- olddefconfig
+          grep -q '^CONFIG_MODVERSIONS=y' .config && echo "MODVERSIONS=y" >> "$GITHUB_ENV" || echo "MODVERSIONS=n" >> "$GITHUB_ENV"
+
+      - name: modules_prepare (fast path)
+        if: env.MODVERSIONS == 'n'
+        run: |
+          cd kernel
+          make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- modules_prepare
+
+      # MODVERSIONS=y 时模块必须带符号 CRC，需要整棵内核树编出的 Module.symvers
+      - name: Full kernel build (only when MODVERSIONS=y)
+        if: env.MODVERSIONS == 'y'
+        run: |
+          cd kernel
+          # gcc10+ 默认 -fno-common，4.9 自带 dtc 的 yylloc 会多重定义，host 端加 -fcommon
+          make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- HOSTCFLAGS="-fcommon" -j"$(nproc)"
+
+      - name: Build lsdriver.ko
+        run: |
+          make -C kernel M="$PWD/lsdriver" ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \
+            LOCALVERSION="${{ inputs.localversion }}" modules
+
+      - name: Show vermagic
+        run: modinfo lsdriver/lsdriver.ko | grep -E 'vermagic|depends' || true
+
+      - name: Upload lsdriver.ko
+        uses: actions/upload-artifact@v4
+        with:
+          name: lsdriver-ko
+          path: lsdriver/lsdriver.ko
