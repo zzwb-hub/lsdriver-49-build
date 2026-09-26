@@ -91,7 +91,8 @@ ccflags-y += -foptimize-sibling-calls
 
 # 关闭自动局部变量清零：避免编译器在函数入口为未初始化栈对象插入 memset/零存储。
 # 代码必须自行保证所有局部变量在首次读取前已完成初始化，否则会暴露真实的未初始化读取。
-ccflags-y += -ftrivial-auto-var-init=uninitialized
+# 4.9适配：-ftrivial-auto-var-init 为 GCC12+/Clang12+ 参数，CI 用 GCC11，移除（代码本就自行初始化，语义不变）
+# 原参数：ccflags-y += -ftrivial-auto-var-init=uninitialized
 
 # 循环展开：用代码体积换取更少的循环回边、比较和分支指令。
 ccflags-y += -funroll-loops

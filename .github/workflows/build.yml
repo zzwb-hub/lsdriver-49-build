@@ -1,15 +1,15 @@
 name: build-lsdriver-4.9
 
-# 为一加6（enchilada，氢OS Android 10，内核 4.9.179）云编译 lsdriver.ko
+# 为一加6（enchilada，氢OS Android 10，内核 4.9.179-perf+）云编译 lsdriver.ko
 # 手动触发：GitHub 网页 → Actions → build-lsdriver-4.9 → Run workflow
 
 on:
   workflow_dispatch:
     inputs:
       localversion:
-        description: 'LOCALVERSION 后缀，对齐手机 adb shell uname -r 的后缀（如 -perf+），无后缀留空'
+        description: 'vermagic 后缀。defconfig 已带 -perf，默认填 + 使结果为 4.9.179-perf+（对齐 adb shell uname -r）'
         required: false
-        default: ''
+        default: '+'
 
 env:
   KERNEL_REPO: https://github.com/OnePlusOSS/android_kernel_oneplus_sdm845.git
@@ -17,7 +17,9 @@ env:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    # ubuntu-22.04 自带 gcc-11 交叉工具链：认识 armv8.6-a（驱动 Makefile 需要），又对 4.9 老内核友好。
+    # 原厂内核为 gcc 4.9 编译（/proc/version 实证），clang 路线不走。
+    runs-on: ubuntu-22.04
     steps:
       - name: Checkout lsdriver source
         uses: actions/checkout@v4
@@ -31,11 +33,28 @@ jobs:
       - name: Clone OnePlus 4.9 kernel (shallow)
         run: git clone --depth 1 --branch "${{ env.KERNEL_BRANCH }}" "${{ env.KERNEL_REPO }}" kernel
 
-      - name: Configure kernel (enchilada_defconfig)
+      # OnePlusOSS 公开树不完整：drivers/Kconfig 引用但缺失 drivers/oneplus/。
+      # 通用兜底：把所有 Kconfig 里 source 了但文件不存在的路径补成空 Kconfig。
+      - name: Stub missing vendor Kconfigs
         run: |
           cd kernel
-          make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- enchilada_defconfig
-          # 关掉 SCM 自动版本后缀，保证 vermagic 只由 LOCALVERSION 输入控制，结果可复现
+          mkdir -p drivers/oneplus
+          [ -f drivers/oneplus/Kconfig ] || echo '# stub: OnePlusOSS 公开树未包含此目录' > drivers/oneplus/Kconfig
+          [ -f drivers/oneplus/Makefile ] || echo '# stub' > drivers/oneplus/Makefile
+          grep -rhoP 'source\s+"\K[^"]+' --include=Kconfig . | sort -u | while read -r f; do
+            case "$f" in *'$'*) continue;; esac
+            if [ ! -f "$f" ]; then
+              mkdir -p "$(dirname "$f")"
+              echo '# stub: missing in OnePlusOSS release' > "$f"
+              echo "stubbed: $f"
+            fi
+          done
+
+      - name: Configure kernel (sdm845-perf_defconfig)
+        run: |
+          cd kernel
+          make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- sdm845-perf_defconfig
+          # defconfig 自带 CONFIG_LOCALVERSION="-perf"；关闭 SCM 自动后缀，保证可复现
           scripts/config --disable LOCALVERSION_AUTO || true
           make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- olddefconfig
           grep -q '^CONFIG_MODVERSIONS=y' .config && echo "MODVERSIONS=y" >> "$GITHUB_ENV" || echo "MODVERSIONS=n" >> "$GITHUB_ENV"
@@ -44,15 +63,16 @@ jobs:
         if: env.MODVERSIONS == 'n'
         run: |
           cd kernel
-          make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- modules_prepare
+          make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- LOCALVERSION="${{ inputs.localversion }}" modules_prepare
 
-      # MODVERSIONS=y 时模块必须带符号 CRC，需要整棵内核树编出的 Module.symvers
+      # sdm845-perf_defconfig 已确认 MODVERSIONS=y：模块必须带符号 CRC，需要整树编出 Module.symvers
       - name: Full kernel build (only when MODVERSIONS=y)
         if: env.MODVERSIONS == 'y'
         run: |
           cd kernel
           # gcc10+ 默认 -fno-common，4.9 自带 dtc 的 yylloc 会多重定义，host 端加 -fcommon
-          make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- HOSTCFLAGS="-fcommon" -j"$(nproc)"
+          make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- HOSTCFLAGS="-fcommon" \
+            LOCALVERSION="${{ inputs.localversion }}" -j"$(nproc)"
 
       - name: Build lsdriver.ko
         run: |
