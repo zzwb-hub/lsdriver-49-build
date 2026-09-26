@@ -61,6 +61,27 @@ jobs:
               echo "stubbed header: $f"
             fi
           done
+          # fair.c 实际调用 opchain 函数，空头文件会 implicit declaration，
+          # 需要中性实现桩（is_opc_task 恒 false、opc_cpu_util 原样返回=关闭 opchain 增强，
+          # 不改导出符号，对 Module.symvers/CRC 无影响；我们不刷这个内核）
+          cat > drivers/oneplus/coretech/uxcore/opchain_helper.h <<'EOF'
+/* stub: OnePlusOSS 公开树未包含 opchain 实现，中性实现保证编译通过 */
+#ifndef _OPCHAIN_HELPER_H
+#define _OPCHAIN_HELPER_H
+#include <linux/types.h>
+struct task_struct;
+#define UT_FORE 0
+#define UT_BACK 1
+#ifndef FIRST_BIG_CORE
+#define FIRST_BIG_CORE 4 /* sdm845: cpu0-3 little, cpu4-7 big */
+#endif
+static inline void opc_task_switch(bool enqueue, int cpu, struct task_struct *p, int flags) {}
+static inline unsigned long opc_cpu_util(unsigned long util, int cpu, struct task_struct *p, int path) { return util; }
+static inline bool is_opc_task(struct task_struct *p, int type) { return false; }
+static inline int opc_select_path(struct task_struct *cur, struct task_struct *p, int prev_cpu) { return -1; }
+static inline int opc_get_claim_on_cpu(int cpu) { return 0; }
+#endif
+EOF
 
       - name: Configure kernel (sdm845-perf_defconfig)
         run: |
