@@ -28,7 +28,10 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential bc bison flex libssl-dev \
-            gcc-aarch64-linux-gnu device-tree-compiler
+            gcc-aarch64-linux-gnu device-tree-compiler python2
+          # 4.9 内核的 scripts/gcc-wrapper.py 是 Python2 语法（print >> sys.stderr），
+          # 其 shebang 为 #!/usr/bin/env python，需要把 python 指到 python2
+          sudo ln -sf /usr/bin/python2 /usr/local/bin/python
 
       - name: Clone OnePlus 4.9 kernel (shallow)
         run: git clone --depth 1 --branch "${{ env.KERNEL_BRANCH }}" "${{ env.KERNEL_REPO }}" kernel
