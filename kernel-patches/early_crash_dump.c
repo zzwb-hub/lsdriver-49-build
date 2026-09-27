@@ -9,7 +9,8 @@
  *
  * 实测原厂参数：region phys 0xAC300000, size 4M；record 0x40000/console 0x40000/
  * ftrace 0x40000/pmsg 0x200000/devinfo 0x1000。dump 区 = 4M - 那些 = 0x17f000，
- * 故 console 区 phys = 0xAC47F000。仅诊断构建编入，定位后移除。
+ * max_dump_cnt = 0x17f000/0x40000 = 5（余数丢弃），故 console 区 phys =
+ * 0xAC300000 + 5*0x40000 = 0xAC440000。仅诊断构建编入，定位后移除。
  */
 
 #include <linux/module.h>
@@ -24,8 +25,8 @@
 #include <asm/cacheflush.h>
 
 #define LSD_REGION_PHYS		0xAC300000UL
-#define LSD_CONSOLE_OFF		0x17f000UL
-#define LSD_CONSOLE_PHYS	(LSD_REGION_PHYS + LSD_CONSOLE_OFF)
+#define LSD_CONSOLE_OFF		0x140000UL	/* 5 × record_size 0x40000 */
+#define LSD_CONSOLE_PHYS	(LSD_REGION_PHYS + LSD_CONSOLE_OFF) /* 0xAC440000 */
 #define LSD_CONSOLE_CAP		0x40000UL	/* 含头 */
 
 #define DBGC			0x43474244U
