@@ -28,14 +28,14 @@ t = t.replace(a1, r1, 1)
 # --- 2) 清 dload magic（否则 aboot 仍进 CrashDump）---
 a2 = (
     T + "set_dload_mode(download_mode &&\n"
-    + T + T + "(in_panic || restart_mode == RESTART_DLOAD));\n"
+    + T + T + T + "(in_panic || restart_mode == RESTART_DLOAD));\n"
 )
 r2 = (
     T + "if (lsd_diag_fastboot)\n"
     + T + T + "set_dload_mode(0);\n"
     + T + "else\n"
     + T + "set_dload_mode(download_mode &&\n"
-    + T + T + "(in_panic || restart_mode == RESTART_DLOAD));\n"
+    + T + T + T + "(in_panic || restart_mode == RESTART_DLOAD));\n"
 )
 if a2 not in t:
     sys.exit("anchor2 not found")
