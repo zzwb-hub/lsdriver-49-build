@@ -112,6 +112,13 @@ jobs:
           print("patched trace headers:", fixed)
           '
 
+      # 4.9 in-tree 编译不给 -I 当前源码目录(Makefile.lib KBUILD_SRC 分支)，
+      # 厂商代码 <function/u_ncm.h> 尖括号找不到，补 -I
+      - name: Fix gadget include path
+        run: |
+          cd kernel
+          python3 -c 'p="drivers/usb/gadget/Makefile"; t=open(p).read(); t += "\nccflags-y += -I$(srctree)/drivers/usb/gadget\n"; open(p,"w").write(t)'
+
       - name: Configure kernel (sdm845-perf_defconfig)
         run: |
           cd kernel
@@ -147,6 +154,10 @@ jobs:
       # sdm845-perf_defconfig 已确认 MODVERSIONS=y：模块必须带符号 CRC，需要整树编出 Module.symvers
       # CC 直指交叉 gcc，绕过 gcc-wrapper.py——它把 GCC11 的新警告强制升级为错误（forbidden warning），
       # 我们只要 Module.symvers/CRC，不刷这个内核，警告无害
+      # 两步走：
+      #   1) make vmlinux —— dir descent 编译全部 .o(obj-y/obj-m)并链接 vmlinux，不碰公开树裁剪坏的 dtbs
+      #   2) make -f scripts/Makefile.modpost —— 默认 _modpost 目标只生成 Module.symvers，
+      #      不链接无关内核模块的 .ko（省时间、避坑）
       - name: Full kernel build (only when MODVERSIONS=y)
         if: env.MODVERSIONS == 'y'
         run: |
@@ -154,7 +165,9 @@ jobs:
           # gcc10+ 默认 -fno-common，4.9 自带 dtc 的 yylloc 会多重定义，host 端加 -fcommon
           make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CC=aarch64-linux-gnu-gcc \
             HOSTCFLAGS="-fcommon" \
-            LOCALVERSION="${{ inputs.localversion }}" -j"$(nproc)"
+            LOCALVERSION="${{ inputs.localversion }}" -j"$(nproc)" vmlinux
+          make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \
+            LOCALVERSION="${{ inputs.localversion }}" -f scripts/Makefile.modpost
 
       - name: Build lsdriver.ko
         run: |
