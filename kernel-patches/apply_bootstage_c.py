@@ -19,13 +19,21 @@ def rep(old, new, tag):
         sys.exit("anchor not unique: " + tag)
     t = t.replace(old, new, 1)
 
-# include + stage 20
+# include at the top header block (must precede rest_init(), which sits
+# before start_kernel and also calls lsd_boot_stage)
+rep(
+    "#include <linux/types.h>\n",
+    "#include <linux/types.h>\n"
+    "#include <linux/lsd_bootstage.h>\n",
+    "top include",
+)
+
+# stage 20
 rep(
     "asmlinkage __visible void __init start_kernel(void)\n"
     "{\n"
     + T + "char *command_line;\n"
     + T + "char *after_dashes;\n",
-    "#include <linux/lsd_bootstage.h>\n"
     "asmlinkage __visible void __init start_kernel(void)\n"
     "{\n"
     + T + "char *command_line;\n"
