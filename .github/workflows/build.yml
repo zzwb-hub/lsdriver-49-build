@@ -141,12 +141,8 @@ jobs:
           # OnePlusOSS 公开树坑：BTFM_SLIM 默认随 MSM_BT_POWER 打开，但 <btfm_slim.h> 缺 include 路径，编不过。
           # 我们只要 Module.symvers 的 CRC，蓝牙驱动无关，直接关掉
           scripts/config --disable BTFM_SLIM --disable BTFM_SLIM_WCN3990 || true
-          # OnePlusOSS 公开树坑：显示/GPU/多媒体驱动缺大量头文件，且对逆向模块完全无关，批量禁用
-          scripts/config --disable QCOM_MDSS_PLL || true
-          scripts/config --disable DRM_MSM || true
-          scripts/config --disable QCOM_KGSL || true
-          scripts/config --disable MSM_MDSS || true
-          scripts/config --disable FB_MSM || true
+          # 此内核要真机启动：显示(SDE)/GPU(KGSL)/MDSS_PLL 必须保留（defconfig 本就开启，禁止 disable）。
+          # 仅禁用与开机无关、且公开树缺头的多媒体（相机/视频/音频），需要时再逐个修复
           scripts/config --disable SPECTRA_CAMERA || true
           scripts/config --disable MSMB_CAMERA || true
           scripts/config --disable MSM_SDE_ROTATOR || true
@@ -154,8 +150,10 @@ jobs:
           scripts/config --disable MSM_VIDC_V4L2 --disable MSM_VIDC_3X_V4L2 || true
           scripts/config --disable SND_SOC_MSM || true
           scripts/config --disable SLIMBUS || true
-          scripts/config --disable MDSS || true
+          # 关键：关闭模块签名强制 → 未签名第三方 .ko 可加载（MODULE_SIG 保留无害，仅给内核加 taint）
+          scripts/config --disable MODULE_SIG_FORCE
           make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- olddefconfig
+          if grep -q '^# CONFIG_MODULE_SIG_FORCE is not set' .config; then echo "SIG_FORCE=off"; else echo "SIG_FORCE=STILL ON"; fi
           grep -q '^CONFIG_MODVERSIONS=y' .config && echo "MODVERSIONS=y" >> "$GITHUB_ENV" || echo "MODVERSIONS=n" >> "$GITHUB_ENV"
 
       - name: modules_prepare (fast path)
@@ -179,7 +177,9 @@ jobs:
           make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CC="ccache aarch64-linux-gnu-gcc" \
             HOSTCFLAGS="-fcommon" \
             LDFLAGS="--warn-unresolved-symbols" \
-            LOCALVERSION="${{ inputs.localversion }}" -j"$(nproc)" vmlinux
+            LOCALVERSION="${{ inputs.localversion }}" -j"$(nproc)" vmlinux Image.gz
+          # Image.gz = gzip 压缩的可启动内核（arm64 默认 KERNEL_GZIP，与原厂一致）
+          ls -la arch/arm64/boot/Image.gz
           # 独立调用 modpost 时 objtree/srctree 为空会把 Module.symvers 写到根目录，显式指定
           make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \
             objtree=. srctree=. \
@@ -193,6 +193,30 @@ jobs:
 
       - name: Show vermagic
         run: modinfo lsdriver/lsdriver.ko | grep -E 'vermagic|depends' || true
+
+      # 用 magiskboot 解包原厂 boot_b.img，只替换 kernel，ramdisk（含 Magisk）/dtb/cmdline 原样保留
+      - name: Repack boot.img with new kernel
+        run: |
+          set -e
+          # Magisk apk 内的 lib/x86_64/libmagiskboot.so 就是独立可执行的 magiskboot
+          curl -L --retry 3 -o /tmp/magisk.apk \
+            https://github.com/topjohnwu/Magisk/releases/download/v27.0/Magisk-v27.0.apk
+          (cd /tmp && unzip -o -j magisk.apk lib/x86_64/libmagiskboot.so -d mb && chmod +x mb/libmagiskboot.so)
+          MB=/tmp/mb/libmagiskboot.so
+          mkdir -p outboot && cd outboot
+          cp ../boot/boot_b.img boot.img
+          "$MB" unpack boot.img
+          echo '--- unpacked files ---'; ls -la
+          # 只换内核；若原厂内核尾部追加了 dtb，magiskboot 已拆出 kernel_dtb，repack 时自动接回
+          cp ../kernel/arch/arm64/boot/Image.gz kernel
+          "$MB" repack boot.img new-boot.img
+          ls -la new-boot.img
+
+      - name: Upload patched boot.img
+        uses: actions/upload-artifact@v4
+        with:
+          name: patched-boot-img
+          path: outboot/new-boot.img
 
       - name: Upload lsdriver.ko
         uses: actions/upload-artifact@v4
