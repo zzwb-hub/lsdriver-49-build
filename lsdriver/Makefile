@@ -41,8 +41,12 @@ ccflags-y += -O3
 ccflags-y += -march=armv8.6-a+bf16+i8mm+fp16fml+fp16+lse+rcpc+crc
 
 # 禁止优化器从普通 C 循环和基本块主动生成 Advanced SIMD 向量代码。
-# 移除 -mgeneral-regs-only 的对象还会额外使用 -mno-implicit-float。
+# clang 用 -fno-vectorize/-fno-slp-vectorize；GCC 对应参数名不同
+ifeq ($(cc-name),clang)
 ccflags-y += -fno-vectorize -fno-slp-vectorize
+else
+ccflags-y += -fno-tree-vectorize -fno-tree-slp-vectorize
+endif
 
 # ARM64 Kbuild 默认添加 -mgeneral-regs-only，它也会禁止显式 FP/SIMD 内联汇编；
 # 仅从显式使用 FP/SIMD 汇编的目标中移除此限制，不影响模块的其他目标文件。
@@ -55,12 +59,16 @@ CFLAGS_REMOVE_arm64_emulate/arm64_emulate_register.o += -mgeneral-regs-only
 
 # 移除 -mgeneral-regs-only 后，仍禁止编译器自动生成或自动向量化为 FP/SIMD 指令；
 # FP/SIMD 寄存器只允许由源码中可审计的显式内联汇编使用。
+# -mno-implicit-float 为 clang 专用参数，GCC 无对应物；
+# GCC 下靠上面的 -fno-tree-vectorize/-fno-tree-slp-vectorize 兜底（这些文件 C 代码无浮点运算）
+ifeq ($(cc-name),clang)
 CFLAGS_lsdriver_main.o += -mno-implicit-float
 CFLAGS_arm64_emulate/emulate_inst.o += -mno-implicit-float
 CFLAGS_arm64_emulate/arm64_emulate_ldst.o += -mno-implicit-float
 CFLAGS_arm64_emulate/arm64_emulate_simd.o += -mno-implicit-float
 CFLAGS_arm64_emulate/arm64_emulate_immediate.o += -mno-implicit-float
 CFLAGS_arm64_emulate/arm64_emulate_register.o += -mno-implicit-float
+endif
 
 
 

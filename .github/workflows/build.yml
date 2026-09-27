@@ -199,3 +199,12 @@ jobs:
         with:
           name: lsdriver-ko
           path: lsdriver/lsdriver.ko
+
+      # 即使 job 失败也保存 ccache：actions/cache 默认只在成功时写缓存，
+      # 不加这步会陷入"失败→没缓存→下轮又全量编译"的循环
+      - name: Save ccache (even on failure)
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: ~/.cache/ccache
+          key: ccache-${{ runner.os }}-${{ github.sha }}
