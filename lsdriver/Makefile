@@ -21,6 +21,10 @@ lsdriver-y := lsdriver_main.o \
 $(obj)/lsdriver_main.o: $(src)/lsdriver.c FORCE
 	$(call if_changed_dep,cc_o_c)
 
+# 4.9 内核 KBUILD_CFLAGS 硬编码若干 -Werror=*（implicit-int/strict-prototypes 等），
+# ccflags-y 里的 -Wno-error 因顺序靠前压不住；per-file 标志在命令行最末尾，确保生效
+CFLAGS_lsdriver_main.o += -Wno-error
+
 #O3优化:启用更积极的内联、循环变换、指令调度和常量传播。
 ccflags-y += -O3
 

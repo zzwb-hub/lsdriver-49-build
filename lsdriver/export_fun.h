@@ -23,6 +23,89 @@
 #include <asm/pgtable.h>
 #include <asm/pgtable-prot.h>
 #include <asm/tlbflush.h>
+#include <asm/hugetlb.h> /* 4.9: pud_huge/pmd_huge 原型在此，pud_leaf/pmd_leaf shim 需要 */
+#include <asm/sysreg.h>
+
+// ======================== 内核 4.9 兼容 shim（必须在 arm64_reg.h 等业务头之前） ========================
+
+// sysreg_clear_set 在 4.14 引入；4.9 的 read_sysreg/write_sysreg 直传寄存器名
+// 到汇编（小写 mdscr_el1 合法，见 asm/assembler.h），直接复用
+#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 14, 0)
+#define sysreg_clear_set(reg, clear, set) do {          \
+        uint64_t __v = (uint64_t)read_sysreg(reg);      \
+        __v &= ~(uint64_t)(clear);                     \
+        __v |= (uint64_t)(set);                        \
+        write_sysreg(__v, reg);                         \
+    } while (0)
+#endif
+
+// arm_smccc_conduit 枚举 4.16 才有；驱动里仅按 HVC/SMC 二选一，值序自定义自洽
+#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 16, 0)
+enum arm_smccc_conduit { SMCCC_CONDUIT_HVC, SMCCC_CONDUIT_SMC };
+#endif
+
+// 4.9 arm-smccc.h 无 VENDOR_HYP owner（规范值 6，位于 STANDARD=4 与 TRUSTED_APP=48 之间）
+#ifndef ARM_SMCCC_OWNER_VENDOR_HYP
+#define ARM_SMCCC_OWNER_VENDOR_HYP 6
+#endif
+
+// clone3 为 5.3 新增系统调用；4.9 上 435 号无对应调用，case 为死分支，语义安全
+#ifndef __NR_clone3
+#define __NR_clone3 435
+#endif
+
+// fallthrough 伪语句 5.9 才有；旧编译器上退化为空语句（仅表"故意贯穿"意图，无运行时效果）
+#ifndef fallthrough
+#define fallthrough do {} while (0)
+#endif
+
+// ESR_ELx_FSC_LEVEL：故障状态中的翻译级位（与 PERM=0xC 组合 = 0xD 即 L3 权限故障）
+#ifndef ESR_ELx_FSC_LEVEL
+#define ESR_ELx_FSC_LEVEL (0x3)
+#endif
+
+// PTE_MAYBE_GP：BTI 的 Guard Page 位，4.9 无 BTI → 0
+#ifndef PTE_MAYBE_GP
+#define PTE_MAYBE_GP 0
+#endif
+
+// VMA 访问位/清理位（5.x 引入）；4.9 无 pkey，CLEAR 取 0 即只清 rwx
+#ifndef VM_ACCESS_FLAGS
+#define VM_ACCESS_FLAGS (VM_READ | VM_WRITE | VM_EXEC)
+#endif
+#ifndef VM_FLAGS_CLEAR
+#define VM_FLAGS_CLEAR 0
+#endif
+
+// __is_lm_address：判断地址是否落在 kernel linear map（5.4+ 提供精确版）；
+// 4.9 线性映射从 PAGE_OFFSET 开始，比较下界即可
+#ifndef __is_lm_address
+#define __is_lm_address(addr) ((uint64_t)(addr) >= (uint64_t)PAGE_OFFSET)
+#endif
+
+// access_ok 在 5.0 去掉 type 参数；包装一层
+#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 0, 0)
+#define lsd_access_ok(addr, size) access_ok(VERIFY_WRITE, (addr), (size))
+#else
+#define lsd_access_ok(addr, size) access_ok((addr), (size))
+#endif
+
+// sched_set_fifo[_low] 5.7 才有：FIFO 优先级 1 / MAX_RT_PRIO/2
+#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 7, 0)
+static inline int lsd_sched_set_fifo_low(struct task_struct *p)
+{
+    struct sched_param sp = {.sched_priority = 1};
+    return sched_setscheduler_nocheck(p, SCHED_FIFO, &sp);
+}
+static inline int lsd_sched_set_fifo(struct task_struct *p)
+{
+    struct sched_param sp = {.sched_priority = MAX_RT_PRIO / 2};
+    return sched_setscheduler_nocheck(p, SCHED_FIFO, &sp);
+}
+#define sched_set_fifo_low lsd_sched_set_fifo_low
+#define sched_set_fifo lsd_sched_set_fifo
+#endif
+
 #include "arm64_encode/arm64_encode.h"
 #include "arm64_reg.h"
 #include "lsdriver_log.h"
@@ -52,6 +135,16 @@ typedef pgd_t p4d_t;
 // pud_leaf/pmd_leaf 为后引入的大页判断；4.9 对应 pud_huge/pmd_huge
 #define pud_leaf(pud)         pud_huge(pud)
 #define pmd_leaf(pmd)         pmd_huge(pmd)
+
+// __TLBI_VADDR 在 4.10 的 tlbflush 重写中引入；4.9 无此宏。
+// 作用：去掉页内偏移并转为 TLBI 操作数格式 VA[43:12]，ASID 放高位
+#define __TLBI_VADDR(addr, asid)                            \
+    ({                                                       \
+        uint64_t __ta = ((uint64_t)(addr)) >> 12;           \
+        __ta &= (uint64_t)GENMASK_ULL(43, 0);               \
+        __ta |= ((uint64_t)(asid)) << 48;                   \
+        __ta;                                                \
+    })
 #endif
 // ======================== 4.9 兼容层结束 ========================
 
@@ -647,7 +740,7 @@ static __always_inline int copy_from_user_inatomic_nofault(void *dst, const void
 {
     unsigned long not_copied;
 
-    if (!access_ok(src, size)) return -EFAULT;
+    if (!lsd_access_ok(src, size)) return -EFAULT;
 
     pagefault_disable();
     not_copied = __copy_from_user_inatomic(dst, src, size);
@@ -659,7 +752,7 @@ static __always_inline int copy_to_user_inatomic_nofault(void __user *dst, const
 {
     unsigned long not_copied;
 
-    if (!access_ok(dst, size)) return -EFAULT;
+    if (!lsd_access_ok(dst, size)) return -EFAULT;
 
     pagefault_disable();
     not_copied = __copy_to_user_inatomic(dst, src, size);
