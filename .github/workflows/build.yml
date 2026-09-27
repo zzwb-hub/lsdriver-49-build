@@ -164,8 +164,12 @@ jobs:
           scripts/config --disable SLIMBUS || true
           # 关键：关闭模块签名强制 → 未签名第三方 .ko 可加载（MODULE_SIG 保留无害，仅给内核加 taint）
           scripts/config --disable MODULE_SIG_FORCE
+          # 诊断用：关闭 panic 强制咬看门狗（硬复位会饿死 pstore 落盘），保证崩溃栈写入 ramoops
+          scripts/config --disable QCOM_FORCE_WDOG_BITE_ON_PANIC
           make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- olddefconfig
           if grep -q '^# CONFIG_MODULE_SIG_FORCE is not set' .config; then echo "SIG_FORCE=off"; else echo "SIG_FORCE=STILL ON"; fi
+          grep -q '^CONFIG_PSTORE_RAM=y' .config && echo 'PSTORE_RAM=y'
+          grep -q '^CONFIG_QCOM_FORCE_WDOG_BITE_ON_PANIC=y' .config && echo 'WDOGBITE=STILL ON' || echo 'WDOGBITE=off'
           grep -q '^CONFIG_MODVERSIONS=y' .config && echo "MODVERSIONS=y" >> "$GITHUB_ENV" || echo "MODVERSIONS=n" >> "$GITHUB_ENV"
 
       - name: modules_prepare (fast path)
