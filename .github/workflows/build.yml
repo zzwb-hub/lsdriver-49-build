@@ -236,12 +236,16 @@ jobs:
         if: env.MODVERSIONS == 'y'
         run: |
           cd kernel
+          # 打印构建前 ccache 累计统计（用于量化真实命中率，而非只看缓存是否恢复）
+          ccache -s || true
           # gcc10+ 默认 -fno-common，4.9 自带 dtc 的 yylloc 会多重定义，host 端加 -fcommon。
           # 可启动内核禁止使用 --warn-unresolved-symbols：未解析符号被掩盖会导致真机早期崩溃。
           # 目标内核用与原厂一致的 Google gcc-4.9（KERNEL_CC/KERNEL_CROSS），避免新 gcc 误编译
           make ARCH=arm64 CROSS_COMPILE="$KERNEL_CROSS" CC="ccache $KERNEL_CC" \
             HOSTCFLAGS="-fcommon" \
             LOCALVERSION="${{ inputs.localversion }}" -j"$(nproc)" vmlinux Image.gz
+          # 构建后再打印一次，前后差值即本次命中/未命中数量
+          ccache -s || true
           # Image.gz = gzip 压缩的可启动内核（arm64 默认 KERNEL_GZIP，与原厂一致）
           ls -la arch/arm64/boot/Image.gz
           # 独立调用 modpost 时 objtree/srctree 为空会把 Module.symvers 写到根目录，显式指定
