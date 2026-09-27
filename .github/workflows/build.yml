@@ -102,9 +102,11 @@ jobs:
           scripts/config --disable QCOM_KGSL || true
           scripts/config --disable MSM_MDSS || true
           scripts/config --disable FB_MSM || true
-          scripts/config --disable MSM_CAMERA || true
-          scripts/config --disable MSM_VIDC || true
-          scripts/config --disable MSM_V4L2_VIDEO || true
+          scripts/config --disable SPECTRA_CAMERA || true
+          scripts/config --disable MSMB_CAMERA || true
+          scripts/config --disable MSM_SDE_ROTATOR || true
+          scripts/config --disable ADSP_SHMEM || true
+          scripts/config --disable MSM_VIDC_V4L2 --disable MSM_VIDC_3X_V4L2 || true
           scripts/config --disable SND_SOC_MSM || true
           scripts/config --disable SLIMBUS || true
           scripts/config --disable MDSS || true
