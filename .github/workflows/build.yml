@@ -28,10 +28,20 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential bc bison flex libssl-dev \
-            gcc-aarch64-linux-gnu device-tree-compiler python2
+            gcc-aarch64-linux-gnu device-tree-compiler python2 ccache
           # 4.9 内核的 scripts/gcc-wrapper.py 是 Python2 语法（print >> sys.stderr），
           # 其 shebang 为 #!/usr/bin/env python，需要把 python 指到 python2
           sudo ln -sf /usr/bin/python2 /usr/local/bin/python
+          # 内核编译用 ccache 需要放开时间宏检查（否则 __TIME__ 等导致误判不命中）
+          echo "CCACHE_SLOPPINESS=time_macros" >> "$GITHUB_ENV"
+
+      # ccache：内核编译结果缓存，重跑时未变文件直接命中，20分钟 → 几分钟
+      - name: Restore ccache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ccache
+          key: ccache-${{ runner.os }}-${{ github.sha }}
+          restore-keys: ccache-${{ runner.os }}-
 
       - name: Clone OnePlus 4.9 kernel (shallow)
         run: git clone --depth 1 --branch "${{ env.KERNEL_BRANCH }}" "${{ env.KERNEL_REPO }}" kernel
@@ -166,8 +176,9 @@ jobs:
         run: |
           cd kernel
           # gcc10+ 默认 -fno-common，4.9 自带 dtc 的 yylloc 会多重定义，host 端加 -fcommon
-          make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CC=aarch64-linux-gnu-gcc \
+          make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CC="ccache aarch64-linux-gnu-gcc" \
             HOSTCFLAGS="-fcommon" \
+            LDFLAGS="--warn-unresolved-symbols" \
             LOCALVERSION="${{ inputs.localversion }}" -j"$(nproc)" vmlinux
           make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \
             LOCALVERSION="${{ inputs.localversion }}" -f scripts/Makefile.modpost
@@ -175,7 +186,7 @@ jobs:
       - name: Build lsdriver.ko
         run: |
           make -C kernel M="$PWD/lsdriver" ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \
-            CC=aarch64-linux-gnu-gcc \
+            CC="ccache aarch64-linux-gnu-gcc" \
             LOCALVERSION="${{ inputs.localversion }}" modules
 
       - name: Show vermagic
