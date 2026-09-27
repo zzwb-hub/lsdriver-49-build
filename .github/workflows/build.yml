@@ -154,6 +154,15 @@ jobs:
           cd kernel
           python3 ../kernel-patches/apply_nn_init.py
 
+      # 诊断：抓"静默卡死"（无panic、无USB、屏幕冻结）。在内核启动各阶段往 IMEM
+      # 写进度编号，冷启动后用 imem_reader 模块读出，确定死亡位置。
+      - name: Add IMEM boot-stage tracing
+        run: |
+          cp kernel-patches/lsd_bootstage.h kernel/include/linux/lsd_bootstage.h
+          cd kernel
+          python3 ../kernel-patches/apply_bootstage_asm.py
+          python3 ../kernel-patches/apply_bootstage_c.py
+
       # OnePlusOSS 公开树通病：厂商 trace 头里 #define TRACE_INCLUDE_PATH .，
       # define_trace.h 在 include/trace/ 下按 "./xxx.h" 解析，找不到本目录头。
       # 通用修法：把 "." 替换为从 include/trace 到该头文件目录的相对路径
@@ -273,6 +282,15 @@ jobs:
       - name: Show vermagic
         run: modinfo lsdriver/lsdriver.ko | grep -E 'vermagic|depends' || true
 
+      # 诊断模块：在正常b槽读 IMEM 启动阶段标记。用与内核一致的 gcc-4.9，
+      # 使符号 CRC 与真机匹配，避免 insmod 报 version mismatch。
+      - name: Build imem_reader.ko
+        run: |
+          make -C kernel M="$PWD/kernel-patches/imem_reader" ARCH=arm64 \
+            CROSS_COMPILE="$KERNEL_CROSS" CC="ccache $KERNEL_CC" \
+            LOCALVERSION="${{ inputs.localversion }}" modules
+          modinfo kernel-patches/imem_reader/imem_reader.ko | grep -E 'vermagic|depends' || true
+
       # 用 magiskboot 解包原厂 boot_b.img，只替换 kernel，ramdisk（含 Magisk）/dtb/cmdline 原样保留
       - name: Repack boot.img with new kernel
         run: |
@@ -302,6 +320,12 @@ jobs:
         with:
           name: lsdriver-ko
           path: lsdriver/lsdriver.ko
+
+      - name: Upload imem_reader.ko
+        uses: actions/upload-artifact@v4
+        with:
+          name: imem-reader-ko
+          path: kernel-patches/imem_reader/imem_reader.ko
 
       # 即使 job 失败也保存 ccache：actions/cache 默认只在成功时写缓存，
       # 不加这步会陷入"失败→没缓存→下轮又全量编译"的循环
