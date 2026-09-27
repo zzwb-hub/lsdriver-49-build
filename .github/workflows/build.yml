@@ -43,7 +43,10 @@ jobs:
           cd kernel
           mkdir -p drivers/oneplus
           [ -f drivers/oneplus/Kconfig ] || echo '# stub: OnePlusOSS 公开树未包含此目录' > drivers/oneplus/Kconfig
-          [ -f drivers/oneplus/Makefile ] || echo '# stub' > drivers/oneplus/Makefile
+          # drivers/Makefile 无条件 obj-y += oneplus/，空 Makefile 不会生成 built-in.o 导致父链接失败，
+          # 用一个空 .c 产出空 built-in.o
+          echo 'obj-y += op_stub.o' > drivers/oneplus/Makefile
+          echo '/* empty stub */' > drivers/oneplus/op_stub.c
           grep -rhoP 'source\s+"\K[^"]+' --include=Kconfig . | sort -u | while read -r f; do
             case "$f" in *'$'*) continue;; esac
             if [ ! -f "$f" ]; then
