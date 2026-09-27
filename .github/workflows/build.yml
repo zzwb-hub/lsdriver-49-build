@@ -176,10 +176,10 @@ jobs:
         if: env.MODVERSIONS == 'y'
         run: |
           cd kernel
-          # gcc10+ 默认 -fno-common，4.9 自带 dtc 的 yylloc 会多重定义，host 端加 -fcommon
+          # gcc10+ 默认 -fno-common，4.9 自带 dtc 的 yylloc 会多重定义，host 端加 -fcommon。
+          # 可启动内核禁止使用 --warn-unresolved-symbols：未解析符号被掩盖会导致真机早期崩溃。
           make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CC="ccache aarch64-linux-gnu-gcc" \
             HOSTCFLAGS="-fcommon" \
-            LDFLAGS="--warn-unresolved-symbols" \
             LOCALVERSION="${{ inputs.localversion }}" -j"$(nproc)" vmlinux Image.gz
           # Image.gz = gzip 压缩的可启动内核（arm64 默认 KERNEL_GZIP，与原厂一致）
           ls -la arch/arm64/boot/Image.gz
