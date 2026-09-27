@@ -127,6 +127,18 @@ jobs:
           cp kernel-patches/op_vendor_stubs.c kernel/drivers/oneplus/op_vendor_stubs.c
           echo 'obj-y += op_vendor_stubs.o' >> kernel/drivers/oneplus/Makefile
 
+      # 诊断：极早期 panic 捕获器（ramoops 就绪前直接写物理内存），恢复端扫 magic 读栈
+      - name: Add early crash dumper
+        run: |
+          cp kernel-patches/early_crash_dump.c kernel/drivers/oneplus/early_crash_dump.c
+          echo 'obj-y += early_crash_dump.o' >> kernel/drivers/oneplus/Makefile
+
+      # 诊断：traps.c 在 panic 前调用 lsd_capture(regs)，确保拿到寄存器现场
+      - name: Hook traps oops_end to lsd_capture
+        run: |
+          cd kernel
+          python3 ../kernel-patches/apply_traps_capture.py
+
       # OnePlusOSS 公开树通病：厂商 trace 头里 #define TRACE_INCLUDE_PATH .，
       # define_trace.h 在 include/trace/ 下按 "./xxx.h" 解析，找不到本目录头。
       # 通用修法：把 "." 替换为从 include/trace 到该头文件目录的相对路径
