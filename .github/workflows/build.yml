@@ -100,6 +100,13 @@ jobs:
             '#endif' \
             > drivers/oneplus/coretech/uxcore/opchain_helper.h
 
+      # 公开树缺一加私有函数实现（get_boot_mode/is_fg/param 分区接口），
+      # 用中性桩编入 drivers/oneplus/，保证链接完整且正常开机路径安全
+      - name: Add neutral vendor symbol stubs
+        run: |
+          cp kernel-patches/op_vendor_stubs.c kernel/drivers/oneplus/op_vendor_stubs.c
+          echo 'obj-y += op_vendor_stubs.o' >> kernel/drivers/oneplus/Makefile
+
       # OnePlusOSS 公开树通病：厂商 trace 头里 #define TRACE_INCLUDE_PATH .，
       # define_trace.h 在 include/trace/ 下按 "./xxx.h" 解析，找不到本目录头。
       # 通用修法：把 "." 替换为从 include/trace 到该头文件目录的相对路径
