@@ -16,7 +16,6 @@
 #include <linux/init.h>
 #include <linux/types.h>
 #include <linux/kernel.h>
-#include <linux/panic.h>
 #include <linux/notifier.h>
 #include <linux/sched.h>
 #include <asm/memory.h>
