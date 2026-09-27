@@ -44,7 +44,7 @@ jobs:
           restore-keys: ccache-${{ runner.os }}-
 
       - name: Clone OnePlus 4.9 kernel (shallow)
-        run: git clone --depth 1 --branch "${{ env.KERNEL_BRANCH }}" "${{ env.KERNEL_REPO}" kernel
+        run: git clone --depth 1 --branch "${{ env.KERNEL_BRANCH }}" "${{ env.KERNEL_REPO }}" kernel
 
       # 关键：原厂内核(/proc/version)由 Google aarch64 gcc-4.9 编译。新 gcc-11 编 4.9 内核
       # 能过但可能在启动早期产生致命异常。内核用与原厂一致的 gcc-4.9，保证启动行为对齐。
