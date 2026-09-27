@@ -180,7 +180,9 @@ jobs:
             HOSTCFLAGS="-fcommon" \
             LDFLAGS="--warn-unresolved-symbols" \
             LOCALVERSION="${{ inputs.localversion }}" -j"$(nproc)" vmlinux
+          # 独立调用 modpost 时 objtree/srctree 为空会把 Module.symvers 写到根目录，显式指定
           make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \
+            objtree=. srctree=. \
             LOCALVERSION="${{ inputs.localversion }}" -f scripts/Makefile.modpost
 
       - name: Build lsdriver.ko
