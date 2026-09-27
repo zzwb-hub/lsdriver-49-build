@@ -146,6 +146,14 @@ jobs:
           cd kernel
           python3 ../kernel-patches/apply_poweroff_fastboot.py
 
+      # 修复真机早期 "Kernel BUG at kfree/free_task"（rcuop 回收内核线程时）。
+      # 公开树无 config OPCHAIN，defconfig 的 =y 被 olddefconfig 丢弃，dup_task_struct
+      # 里 tsk->nn=NULL 被宏编译掉，而 nn 的分配/释放未加保护，内核线程 nn 成垃圾。
+      - name: Fix unguarded nn init (OPCHAIN undefined in public tree)
+        run: |
+          cd kernel
+          python3 ../kernel-patches/apply_nn_init.py
+
       # OnePlusOSS 公开树通病：厂商 trace 头里 #define TRACE_INCLUDE_PATH .，
       # define_trace.h 在 include/trace/ 下按 "./xxx.h" 解析，找不到本目录头。
       # 通用修法：把 "." 替换为从 include/trace 到该头文件目录的相对路径
