@@ -155,7 +155,9 @@ jobs:
           # 仅禁用与开机无关、且公开树缺头的多媒体（相机/视频/音频），需要时再逐个修复
           scripts/config --disable SPECTRA_CAMERA || true
           scripts/config --disable MSMB_CAMERA || true
-          scripts/config --disable MSM_SDE_ROTATOR || true
+          # SDE rotator 是显示旋转管线（sde_hw_rot.c 直接调用其 inline 接口），
+          # 必须启用真实驱动；它只依赖 VIDEO_V4L2 核心框架，与相机无关
+          scripts/config --enable VIDEO_V4L2 --enable MSM_SDE_ROTATOR || true
           scripts/config --disable ADSP_SHMEM || true
           scripts/config --disable MSM_VIDC_V4L2 --disable MSM_VIDC_3X_V4L2 || true
           scripts/config --disable SND_SOC_MSM || true

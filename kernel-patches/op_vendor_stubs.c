@@ -75,3 +75,13 @@ int gf_opticalfp_irq_handler(int event)
 {
 	return 0;
 }
+
+/*
+ * 另一套屏下指纹（silead/汇顶等，随触摸源码内联）的通知接口，
+ * enchilada 无屏下指纹硬件，空实现即可。
+ */
+struct fp_underscreen_info;
+int opticalfp_irq_handler(struct fp_underscreen_info *tp_info)
+{
+	return 0;
+}
