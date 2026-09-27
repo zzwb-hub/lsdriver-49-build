@@ -51,7 +51,7 @@ jobs:
       # 能过但可能在启动早期产生致命异常。内核用与原厂一致的 gcc-4.9，保证启动行为对齐。
       - name: Get stock-matching aarch64 gcc-4.9 toolchain
         run: |
-          git clone --depth 1 \
+          git clone --depth 1 --branch android10-release \
             https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9 \
             "$HOME/tc49"
           GCC="$HOME/tc49/bin/aarch64-linux-android-gcc"
