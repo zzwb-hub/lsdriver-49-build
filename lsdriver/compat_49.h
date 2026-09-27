@@ -74,6 +74,13 @@ enum arm_smccc_conduit { SMCCC_CONDUIT_HVC, SMCCC_CONDUIT_SMC };
 #define __is_lm_address(addr) ((uint64_t)(addr) >= (uint64_t)PAGE_OFFSET)
 #endif
 
+/* ---- uaccess_*_privileged：4.14 PAN 重写引入。4.9 对应 uaccess_enable/disable
+ *      （enable=清 PAN 允许内核访问用户内存，disable=置 PAN 恢复隔离） ---- */
+#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 14, 0)
+#define uaccess_enable_privileged()  uaccess_enable()
+#define uaccess_disable_privileged() uaccess_disable()
+#endif
+
 /* ---- access_ok：5.0 去掉 type 参数，包装一层 ---- */
 #if LINUX_VERSION_CODE < KERNEL_VERSION(5, 0, 0)
 #define lsd_access_ok(addr, size) access_ok(VERIFY_WRITE, (addr), (size))
