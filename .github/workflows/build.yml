@@ -44,7 +44,18 @@ jobs:
           restore-keys: ccache-${{ runner.os }}-
 
       - name: Clone OnePlus 4.9 kernel (shallow)
-        run: git clone --depth 1 --branch "${{ env.KERNEL_BRANCH }}" "${{ env.KERNEL_REPO }}" kernel
+        run: git clone --depth 1 --branch "${{ env.KERNEL_BRANCH }}" "${{ env.KERNEL_REPO}" kernel
+
+      # 关键：原厂内核(/proc/version)由 Google aarch64 gcc-4.9 编译。新 gcc-11 编 4.9 内核
+      # 能过但可能在启动早期产生致命异常。内核用与原厂一致的 gcc-4.9，保证启动行为对齐。
+      - name: Get stock-matching aarch64 gcc-4.9 toolchain
+        run: |
+          git clone --depth 1 \
+            https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9 \
+            "$HOME/tc49"
+          "$HOME/tc49/bin/aarch64-linux-android-gcc" --version | head -1
+          echo "KERNEL_CC=$HOME/tc49/bin/aarch64-linux-android-gcc" >> "$GITHUB_ENV"
+          echo "KERNEL_CROSS=$HOME/tc49/bin/aarch64-linux-android-" >> "$GITHUB_ENV"
 
       # OnePlusOSS 公开树不完整：drivers/Kconfig 引用但缺失 drivers/oneplus/。
       # 通用兜底：把所有 Kconfig 里 source 了但文件不存在的路径补成空 Kconfig。
@@ -106,12 +117,6 @@ jobs:
         run: |
           cp kernel-patches/op_vendor_stubs.c kernel/drivers/oneplus/op_vendor_stubs.c
           echo 'obj-y += op_vendor_stubs.o' >> kernel/drivers/oneplus/Makefile
-
-      # 诊断：中断内致命异常改为只记录不 panic，争取进用户态用 adb 读 dmesg 崩溃栈
-      - name: Apply traps diag (suppress panic in interrupt)
-        run: |
-          cd kernel
-          python3 ../kernel-patches/apply_traps_diag.py
 
       # OnePlusOSS 公开树通病：厂商 trace 头里 #define TRACE_INCLUDE_PATH .，
       # define_trace.h 在 include/trace/ 下按 "./xxx.h" 解析，找不到本目录头。
@@ -197,13 +202,14 @@ jobs:
           cd kernel
           # gcc10+ 默认 -fno-common，4.9 自带 dtc 的 yylloc 会多重定义，host 端加 -fcommon。
           # 可启动内核禁止使用 --warn-unresolved-symbols：未解析符号被掩盖会导致真机早期崩溃。
-          make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CC="ccache aarch64-linux-gnu-gcc" \
+          # 目标内核用与原厂一致的 Google gcc-4.9（KERNEL_CC/KERNEL_CROSS），避免新 gcc 误编译
+          make ARCH=arm64 CROSS_COMPILE="${KERNEL_CROSS}" CC="ccache ${KERNEL_CC}" \
             HOSTCFLAGS="-fcommon" \
             LOCALVERSION="${{ inputs.localversion }}" -j"$(nproc)" vmlinux Image.gz
           # Image.gz = gzip 压缩的可启动内核（arm64 默认 KERNEL_GZIP，与原厂一致）
           ls -la arch/arm64/boot/Image.gz
           # 独立调用 modpost 时 objtree/srctree 为空会把 Module.symvers 写到根目录，显式指定
-          make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \
+          make ARCH=arm64 CROSS_COMPILE="${KERNEL_CROSS}" \
             objtree=. srctree=. \
             LOCALVERSION="${{ inputs.localversion }}" -f scripts/Makefile.modpost
 
