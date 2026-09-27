@@ -213,11 +213,22 @@ jobs:
           scripts/config --disable MODULE_SIG_FORCE
           # 诊断用：关闭 panic 强制咬看门狗（硬复位会饿死 pstore 落盘），保证崩溃栈写入 ramoops
           scripts/config --disable QCOM_FORCE_WDOG_BITE_ON_PANIC
+          # 诊断用：抓"静默卡死"（屏幕停在橙色解锁警告、USB不通、无panic）。
+          # 开启 soft/hard lockup 检测器并设为检测到即 panic —— panic 即走现有热复位链路，
+          # RAM保住、自动进fastboot，console区留下卡死瞬间的最后日志与现场。
+          # watchdog_thresh默认10：soft lockup 20s触发，hard lockup 10s触发。
+          scripts/config --enable DEBUG_KERNEL \
+            --enable LOCKUP_DETECTOR \
+            --enable BOOTPARAM_SOFTLOCKUP_PANIC \
+            --enable BOOTPARAM_HARDLOCKUP_PANIC \
+            --enable PANIC_ON_RECURSIVE_FAULT || true
           make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- olddefconfig
           if grep -q '^# CONFIG_MODULE_SIG_FORCE is not set' .config; then echo "SIG_FORCE=off"; else echo "SIG_FORCE=STILL ON"; fi
           grep -q '^CONFIG_PSTORE_RAM=y' .config && echo 'PSTORE_RAM=y'
           grep -q '^CONFIG_QCOM_FORCE_WDOG_BITE_ON_PANIC=y' .config && echo 'WDOGBITE=STILL ON' || echo 'WDOGBITE=off'
           grep -q '^CONFIG_MODVERSIONS=y' .config && echo "MODVERSIONS=y" >> "$GITHUB_ENV" || echo "MODVERSIONS=n" >> "$GITHUB_ENV"
+          echo '--- lockup detector resolution ---'
+          grep -E 'CONFIG_LOCKUP_DETECTOR|CONFIG_HARDLOCKUP_DETECTOR=|SOFTLOCKUP_PANIC_VALUE|HARDLOCKUP_PANIC_VALUE|CONFIG_PANIC_ON_RECURSIVE_FAULT' .config || echo 'LOCKUP CONFIGS MISSING'
 
       - name: modules_prepare (fast path)
         if: env.MODVERSIONS == 'n'
