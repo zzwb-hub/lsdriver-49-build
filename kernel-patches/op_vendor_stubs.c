@@ -12,6 +12,7 @@
  *   oem_check_force_dump_key 空实现（忽略工厂强制转储组合键）
  *   ht_register_thermal...   空实现（跳过厂商温控 hook 注册）
  *   btfm_slim_hw_init        返回 -ENODEV（BTFM_SLIM 被禁用，仅工厂测试 ioctl 触及）
+ *   gf_opticalfp_irq_handler 返回 0（6T 屏下指纹接口，enchilada 无此硬件）
  */
 #include <linux/types.h>
 #include <linux/io.h>
@@ -65,3 +66,12 @@ int btfm_slim_hw_init(struct btfmslim *btfmslim)
 	return -ENODEV;
 }
 #endif
+
+/*
+ * 6T 屏下光学指纹（Goodix）中断通知，6/6T 共用触摸源码里无条件调用。
+ * enchilada 无此硬件、相关手势运行时不会触发，返回 0 即可。
+ */
+int gf_opticalfp_irq_handler(int event)
+{
+	return 0;
+}
