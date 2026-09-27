@@ -8,12 +8,18 @@
  *   is_fg                    恒 false（关闭块层前台 IO 提权）
  *   init_param_mem_base_size 空实现（param 分区信息不使用）
  *   get_param_by_index_...   返回 -ENODATA，不修改调用方缓冲区
+ *   set_param_by_index_...   返回 -ENOSYS（不写 param 分区）
+ *   oem_check_force_dump_key 空实现（忽略工厂强制转储组合键）
+ *   ht_register_thermal...   空实现（跳过厂商温控 hook 注册）
+ *   btfm_slim_hw_init        返回 -ENODEV（BTFM_SLIM 被禁用，仅工厂测试 ioctl 触及）
  */
 #include <linux/types.h>
 #include <linux/io.h>
 #include <linux/errno.h>
 #include <linux/oneplus/boot_mode.h>
 #include <linux/param_rw.h>
+#include <linux/thermal.h>
+#include <linux/oem_force_dump.h>
 
 enum oem_boot_mode get_boot_mode(void)
 {
@@ -36,3 +42,26 @@ int get_param_by_index_and_offset(uint32 sid_index, uint32 offset,
 {
 	return -ENODATA;
 }
+
+int set_param_by_index_and_offset(uint32 sid_index, uint32 offset,
+				  void *buf, int length)
+{
+	return -ENOSYS;
+}
+
+void oem_check_force_dump_key(unsigned int code, int value)
+{
+}
+
+void ht_register_thermal_zone_device(struct thermal_zone_device *tz)
+{
+}
+
+/* 前置声明即可，仅工厂测试 ioctl 会调用；正常蓝牙走 UART 电源路径 */
+#ifndef CONFIG_BTFM_SLIM
+struct btfmslim;
+int btfm_slim_hw_init(struct btfmslim *btfmslim)
+{
+	return -ENODEV;
+}
+#endif
