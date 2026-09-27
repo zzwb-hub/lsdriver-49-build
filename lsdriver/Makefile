@@ -18,10 +18,12 @@ lsdriver-y := lsdriver_main.o \
 			  arm64_emulate/arm64_emulate_immediate.o \
 			  arm64_emulate/arm64_emulate_register.o
 
-# 注意：不要给 lsdriver_main.o 写 $(call if_changed_dep,cc_o_c) 自定义规则。
-# MODVERSIONS=y 时 cmd_cc_o_c 只编译出 .tmp_lsdriver_main.o，真正的改名/CRC 处理
-# 由标准 rule_cc_o_c 中的 cmd_modversions_c 完成（mv .tmp_xxx $@）。
-# 自定义规则会跳过这一步，导致编译"成功"但 lsdriver_main.o 不存在，链接阶段才报错。
+# 源文件名 lsdriver.c 与目标对象 lsdriver_main.o 不同名，kbuild 隐式 %.o←%.c 规则
+# 够不到，必须写显式规则。但务必用 if_changed_rule（执行完整 rule_cc_o_c：
+# 编译 + fixdep + MODVERSIONS 的 .tmp→$@ 改名），不能用 if_changed_dep——
+# 后者只编译出 .tmp_lsdriver_main.o 就结束，跳过改名，链接时才报找不到 .o。
+$(obj)/lsdriver_main.o: $(src)/lsdriver.c FORCE
+	$(call if_changed_rule,cc_o_c)
 
 # 4.9 内核 KBUILD_CFLAGS 硬编码若干 -Werror=*（implicit-int/strict-prototypes 等），
 # ccflags-y 里的 -Wno-error 因顺序靠前压不住；per-file 标志在命令行最末尾，确保生效
