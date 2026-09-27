@@ -107,6 +107,12 @@ jobs:
           cp kernel-patches/op_vendor_stubs.c kernel/drivers/oneplus/op_vendor_stubs.c
           echo 'obj-y += op_vendor_stubs.o' >> kernel/drivers/oneplus/Makefile
 
+      # 诊断：中断内致命异常改为只记录不 panic，争取进用户态用 adb 读 dmesg 崩溃栈
+      - name: Apply traps diag (suppress panic in interrupt)
+        run: |
+          cd kernel
+          python3 ../kernel-patches/apply_traps_diag.py
+
       # OnePlusOSS 公开树通病：厂商 trace 头里 #define TRACE_INCLUDE_PATH .，
       # define_trace.h 在 include/trace/ 下按 "./xxx.h" 解析，找不到本目录头。
       # 通用修法：把 "." 替换为从 include/trace 到该头文件目录的相对路径
