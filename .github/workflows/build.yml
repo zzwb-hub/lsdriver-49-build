@@ -28,7 +28,8 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential bc bison flex libssl-dev \
-            gcc-aarch64-linux-gnu device-tree-compiler python2 ccache
+            gcc-aarch64-linux-gnu device-tree-compiler python2 ccache file \
+            libc6-i386 lib32stdc++6
           # 4.9 内核的 scripts/gcc-wrapper.py 是 Python2 语法（print >> sys.stderr），
           # 其 shebang 为 #!/usr/bin/env python，需要把 python 指到 python2
           sudo ln -sf /usr/bin/python2 /usr/local/bin/python
@@ -53,8 +54,16 @@ jobs:
           git clone --depth 1 \
             https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9 \
             "$HOME/tc49"
-          "$HOME/tc49/bin/aarch64-linux-android-gcc" --version | head -1
-          echo "KERNEL_CC=$HOME/tc49/bin/aarch64-linux-android-gcc" >> "$GITHUB_ENV"
+          GCC="$HOME/tc49/bin/aarch64-linux-android-gcc"
+          echo '--- clone result ---'
+          du -sh "$HOME/tc49"
+          ls -la "$GCC"
+          echo '--- ELF type / interpreter ---'
+          file "$GCC"
+          readelf -l "$GCC" | grep -A1 INTERP || true
+          echo '--- try exec (no pipe masking) ---'
+          "$GCC" --version
+          echo "KERNEL_CC=$GCC" >> "$GITHUB_ENV"
           echo "KERNEL_CROSS=$HOME/tc49/bin/aarch64-linux-android-" >> "$GITHUB_ENV"
 
       # OnePlusOSS 公开树不完整：drivers/Kconfig 引用但缺失 drivers/oneplus/。
