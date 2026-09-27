@@ -14,6 +14,7 @@
 #include <linux/bitops.h>
 #include <linux/mm.h>
 #include <linux/sched.h>
+#include <linux/pid.h>
 #include <linux/uaccess.h>
 #include <linux/hugetlb.h> /* pud_huge/pmd_huge 原型或 fallback 宏；正确顺序包含 asm/hugetlb.h */
 #include <asm/pgtable.h>
@@ -102,6 +103,17 @@ static inline int lsd_sched_set_fifo(struct task_struct *p)
 }
 #define sched_set_fifo_low lsd_sched_set_fifo_low
 #define sched_set_fifo lsd_sched_set_fifo
+#endif
+
+/* ---- find_task_by_vpid：4.9 有函数但未 EXPORT_SYMBOL（modpost 报 undefined）。
+ *      用两个均已导出的 API 等价组合替代：
+ *      find_task_by_vpid(nr) == pid_task(find_vpid(nr), PIDTYPE_PID) ---- */
+#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 10, 0)
+static inline struct task_struct *lsd_find_task_by_vpid(pid_t nr)
+{
+    return pid_task(find_vpid(nr), PIDTYPE_PID);
+}
+#define find_task_by_vpid lsd_find_task_by_vpid
 #endif
 
 /* ---- mmap_sem：5.8 改名 mpa_lock 并配套读写锁 API ---- */
