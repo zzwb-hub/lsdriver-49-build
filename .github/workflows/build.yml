@@ -127,10 +127,13 @@ jobs:
 
       # 4.9 in-tree 编译不给 -I 当前源码目录(Makefile.lib KBUILD_SRC 分支)，
       # 厂商代码 <function/u_ncm.h> 尖括号找不到，补 -I
-      - name: Fix gadget include path
+      - name: Fix gadget/kgsl include path
         run: |
           cd kernel
           python3 -c 'p="drivers/usb/gadget/Makefile"; t=open(p).read(); t += "\nccflags-y += -I$(srctree)/drivers/usb/gadget\n"; open(p,"w").write(t)'
+          # KGSL Makefile 只有 -Iinclude/linux；kgsl_events.c 用尖括号 <kgsl_device.h> 引用同目录头，
+          # kbuild 默认不把源码目录加入 -I，追加 -I$(src)（对子目录同样生效）
+          python3 -c 'p="drivers/gpu/msm/Makefile"; t=open(p).read(); t += "\nccflags-y += -I$(src)\n"; open(p,"w").write(t)'
 
       - name: Configure kernel (sdm845-perf_defconfig)
         run: |
