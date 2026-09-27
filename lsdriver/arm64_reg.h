@@ -13,6 +13,7 @@
 #include <linux/string.h>
 
 #include "lsdriver_log.h"
+#include "compat_49.h" /* 本头可能被 io_struct.h 先于 export_fun.h 包含，shim 必须就位 */
 
 // Linux 6.18 使用 MDSCR_EL1_* 替代旧 DBG_MDSCR_* 名称，寄存器位定义不变。
 // 仅在旧宏缺失时映射到新名称，旧内核继续使用自身定义。
