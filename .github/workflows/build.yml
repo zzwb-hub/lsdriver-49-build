@@ -334,16 +334,7 @@ jobs:
           cp ../kernel/arch/arm64/boot/Image.gz kernel
           "$MB" repack boot.img new-boot.img
           # 二分法: 在 boot.img header 的 cmdline(offset 64, 512字节)追加 lsd_initcall_max
-          python3 -c '
-import sys
-f=open("new-boot.img","r+b"); f.seek(64); c=f.read(512)
-e=c.find(b"\x00"); old=c[:e].decode()
-arg=" lsd_initcall_max=${{ inputs.initcall_max }}"
-if "lsd_initcall_max" not in old: old+=arg
-nb=old.encode()+b"\x00"*(512-len(old))
-f.seek(64); f.write(nb); f.close()
-print("cmdline:", old)
-'
+          python3 -c "f=open('new-boot.img','r+b');f.seek(64);c=f.read(512);e=c.find(b'\x00');old=c[:e].decode();arg=' lsd_initcall_max=${{ inputs.initcall_max }}';old=old+arg if 'lsd_initcall_max' not in old else old;f.seek(64);f.write(old.encode()+b'\x00'*(512-len(old)));f.close();print('cmdline:',old)"
           ls -la new-boot.img
 
       - name: Upload patched boot.img
