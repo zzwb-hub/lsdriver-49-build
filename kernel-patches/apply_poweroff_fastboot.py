@@ -18,8 +18,11 @@ r1 = (
     "{\n"
     + T + "bool need_warm_reset = false;\n"
     + "/* LSD_DIAG */ extern int lsd_diag_fastboot;\n"
-    + T + "/* 不修改 cmd(保持 normal restart reason), 只强制热复位保 RAM,\n"
-    + T + " * 这样复位后 bootloader 自动启动当前槽(a 槽)第二次, 跳过死亡 initcall */\n"
+    + T + "/* 诊断: 强制热复位保RAM, 并强制 restart reason=normal(0x77665501),\n"
+    + T + " * 这样复位后 bootloader 自动启动当前槽(a 槽)第二次, 不进 fastboot */\n"
+    + T + "if (lsd_diag_fastboot) {\n"
+    + T + T + "need_warm_reset = true;\n"
+    + T + "}\n"
 )
 if a1 not in t:
     sys.exit("anchor1 not found (already patched?)")
@@ -41,15 +44,15 @@ if a2 not in t:
     sys.exit("anchor2 not found")
 t = t.replace(a2, r2, 1)
 
-# --- 3) 强制热复位，保证 RAM 不掉电 ---
+# --- 3) 强制热复位 + 强制 restart reason=normal ---
 a3 = (
     T + "if (force_warm_reboot)\n"
     + T + T + "pr_info(\"Forcing a warm reset of the system\\n\");\n"
 )
 r3 = (
     T + "if (lsd_diag_fastboot) {\n"
-    + T + T + "need_warm_reset = true;\n"
-    + T + T + "pr_info(\"LSD diag: forcing warm reset to fastboot\\n\");\n"
+    + T + T + "__raw_writel(0x77665501, restart_reason);\n"
+    + T + T + "pr_info(\"LSD diag: warm reset + restart reason=normal\\n\");\n"
     + T + "}\n"
     + a3
 )
