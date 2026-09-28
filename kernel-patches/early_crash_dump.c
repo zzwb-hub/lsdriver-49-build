@@ -60,6 +60,10 @@ static int lsd_boot_reached_userspace;
 
 /* 前向声明: 定义在文件后部 param 写入器 */
 static void lsd_param_write_now(void);
+#define LSD_PARAM_SECTOR	16	/* offset 0x2000, 避开 BCB */
+#define LSD_PARAM_MAGIC		0x4C534450U	/* "LSDP" */
+struct lsd_param_rec;
+static void lsd_fill_record(struct lsd_param_rec *rec);
 
 static void lsd_boot_deadline_fn(unsigned long data)
 {
@@ -290,8 +294,6 @@ pure_initcall(lsd_early_init);
  * 关键设计: 写入函数可在任意上下文(含定时器软中断)调用, 用异步 bio + mdelay。
  * bdev 在 late_initcall 预打开(进程上下文可睡眠); 若晚于卡死点则定时器直接
  * 跳过写入(仅留 IMEM stage, 下次启动靠 lsd_death_check 读出)。 */
-#define LSD_PARAM_SECTOR	16	/* offset 0x2000, 避开 BCB */
-#define LSD_PARAM_MAGIC	0x4C534450U	/* "LSDP" */
 
 struct lsd_param_rec {
 	u32 magic;
