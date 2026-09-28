@@ -22,6 +22,10 @@
 #include <linux/sched.h>
 #include <linux/timer.h>
 #include <linux/jiffies.h>
+#include <linux/blkdev.h>
+#include <linux/bio.h>
+#include <linux/workqueue.h>
+#include <linux/mm.h>
 #include <asm/memory.h>
 #include <asm/ptrace.h>
 #include <asm/cacheflush.h>
@@ -227,3 +231,98 @@ static int __init lsd_early_init(void)
 	return atomic_notifier_chain_register(&panic_notifier_list, &lsd_nb);
 }
 pure_initcall(lsd_early_init);
+
+/* ---- param 分区写入器：周期性写 boot stage 到 param 分区，
+ * b 槽正常系统可用 dd 读出。卡死时 delayed work 停止，
+ * param 里存的就是卡死前最后的 stage。
+ * 从 early_initcall 启动，重试到 UFS 驱动就绪为止。 ---- */
+#define LSD_PARAM_SECTOR	16	/* offset 0x2000, 避开 BCB */
+#define LSD_PARAM_MAGIC	0x4C534450U	/* "LSDP" */
+
+struct lsd_param_rec {
+	u32 magic;
+	u32 cur_stage;
+	u32 grave_stage;
+	u32 kaslr_offset;
+	u32 restart_reason;
+	char last_console[128];
+};
+
+static struct block_device *lsd_param_bdev;
+static struct page *lsd_param_page;
+static struct delayed_work lsd_param_dw;
+
+static void lsd_param_write_fn(struct work_struct *work)
+{
+	struct bio *bio;
+	struct lsd_param_rec *rec;
+	u8 *imem = (u8 *)__phys_to_virt(LSD_BS_IMEM_PHYS);
+
+	/* 懒初始化：UFS 未就绪时重试 */
+	if (!lsd_param_bdev) {
+		lsd_param_bdev = blkdev_get_by_path("/dev/block/sda4",
+						    FMODE_WRITE | FMODE_READ, NULL);
+		if (IS_ERR(lsd_param_bdev))
+			lsd_param_bdev = blkdev_get_by_dev(MKDEV(8, 4),
+							   FMODE_WRITE | FMODE_READ, NULL);
+		if (IS_ERR(lsd_param_bdev)) {
+			lsd_param_bdev = NULL;
+			goto resched;
+		}
+		if (!lsd_param_page) {
+			lsd_param_page = alloc_page(GFP_NOIO);
+			if (!lsd_param_page) {
+				blkdev_put(lsd_param_bdev, FMODE_WRITE | FMODE_READ);
+				lsd_param_bdev = NULL;
+				goto resched;
+			}
+		}
+	}
+
+	if (!lsd_param_page)
+		goto resched;
+
+	rec = (struct lsd_param_rec *)page_address(lsd_param_page);
+	memset(rec, 0, 4096);
+
+	rec->magic = LSD_PARAM_MAGIC;
+	rec->cur_stage = *(u32 *)(imem + LSD_BS_STAGE_OFF);
+	rec->grave_stage = *(u32 *)(imem + LSD_BS_GRAVE_STAGE_OFF);
+	rec->kaslr_offset = *(u32 *)(imem + 0x6d0);
+	rec->restart_reason = *(u32 *)(imem + 0x65c);
+
+	/* 从 console 区抓最后几行（若有上一次 panic 的记录） */
+	{
+		struct pram *pr = (struct pram *)__phys_to_virt(LSD_CONSOLE_PHYS);
+		if (pr->sig == DBGC && pr->size > 0 && pr->size < LSD_TXT_SZ) {
+			int copylen = pr->size < (s32)sizeof(rec->last_console)
+				      ? pr->size : (s32)sizeof(rec->last_console);
+			memcpy(rec->last_console, pr->data + pr->size - copylen, copylen);
+		}
+	}
+
+	bio = bio_alloc(GFP_NOIO, 1);
+	if (!bio)
+		goto resched;
+	bio->bi_bdev = lsd_param_bdev;
+	bio->bi_opf = REQ_OP_WRITE | REQ_SYNC;
+	bio->bi_iter.bi_sector = LSD_PARAM_SECTOR;
+	if (bio_add_page(bio, lsd_param_page, 4096, 0) < 4096) {
+		bio_put(bio);
+		goto resched;
+	}
+	submit_bio_wait(bio);
+	bio_put(bio);
+
+resched:
+	schedule_delayed_work(&lsd_param_dw, msecs_to_jiffies(2000));
+}
+
+static int __init lsd_param_init(void)
+{
+	INIT_DELAYED_WORK(&lsd_param_dw, lsd_param_write_fn);
+	schedule_delayed_work(&lsd_param_dw, msecs_to_jiffies(2000));
+	pr_info("LSD: param writer scheduled\n");
+	return 0;
+}
+early_initcall(lsd_param_init);
