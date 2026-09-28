@@ -22,6 +22,7 @@
 #include <linux/sched.h>
 #include <linux/timer.h>
 #include <linux/jiffies.h>
+#include <linux/delay.h>
 #include <linux/blkdev.h>
 #include <linux/bio.h>
 #include <linux/workqueue.h>
