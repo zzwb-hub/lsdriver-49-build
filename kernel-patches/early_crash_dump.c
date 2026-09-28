@@ -26,6 +26,7 @@
 #include <linux/blkdev.h>
 #include <linux/bio.h>
 #include <linux/workqueue.h>
+#include <linux/kthread.h>
 #include <linux/mm.h>
 #include <asm/memory.h>
 #include <asm/ptrace.h>
@@ -258,7 +259,6 @@ struct lsd_param_rec {
 
 static struct block_device *lsd_param_bdev;
 static struct page *lsd_param_page;
-static struct delayed_work lsd_param_dw;
 
 static void lsd_fill_record(struct lsd_param_rec *rec)
 {
@@ -310,51 +310,43 @@ static void lsd_param_write_now(void)
 	mdelay(50);
 }
 
-static void lsd_param_write_fn(struct work_struct *work)
+static struct task_struct *lsd_param_thread;
+
+static int lsd_param_kthread(void *data)
 {
-	/* 兜底: 若 late_initcall 时 bdev 未就绪, 在这里重试打开 */
-	if (!lsd_param_bdev) {
-		lsd_param_bdev = blkdev_get_by_path("/dev/block/sda4",
-						    FMODE_WRITE | FMODE_READ, NULL);
-		if (IS_ERR(lsd_param_bdev))
-			lsd_param_bdev = blkdev_get_by_dev(MKDEV(8, 4),
-							   FMODE_WRITE | FMODE_READ, NULL);
-		if (IS_ERR(lsd_param_bdev))
-			lsd_param_bdev = NULL;
-		else
-			pr_info("LSD: param bdev opened (workqueue), ro=%d\n",
-				bdev_read_only(lsd_param_bdev));
+	while (!kthread_should_stop()) {
+		/* 打开 bdev(UFS 未就绪时重试, 可睡眠) */
+		if (!lsd_param_bdev) {
+			lsd_param_bdev = blkdev_get_by_path("/dev/block/sda4",
+							    FMODE_WRITE | FMODE_READ, NULL);
+			if (IS_ERR(lsd_param_bdev))
+				lsd_param_bdev = blkdev_get_by_dev(MKDEV(8, 4),
+								   FMODE_WRITE | FMODE_READ, NULL);
+			if (IS_ERR(lsd_param_bdev)) {
+				lsd_param_bdev = NULL;
+			} else {
+				pr_info("LSD: param bdev opened, ro=%d\n",
+					bdev_read_only(lsd_param_bdev));
+			}
+		}
+		if (!lsd_param_page)
+			lsd_param_page = alloc_page(GFP_KERNEL);
+
+		lsd_param_write_now();
+		msleep(2000);
 	}
-	if (!lsd_param_page)
-		lsd_param_page = alloc_page(GFP_NOIO);
-
-	lsd_param_write_now();
-	schedule_delayed_work(&lsd_param_dw, msecs_to_jiffies(2000));
-}
-
-/* late_initcall: 进程上下文打开 bdev + 分配页 */
-static int __init lsd_param_init(void)
-{
-	lsd_param_bdev = blkdev_get_by_path("/dev/block/sda4",
-					    FMODE_WRITE | FMODE_READ, NULL);
-	if (IS_ERR(lsd_param_bdev))
-		lsd_param_bdev = blkdev_get_by_dev(MKDEV(8, 4),
-						   FMODE_WRITE | FMODE_READ, NULL);
-	if (IS_ERR(lsd_param_bdev)) {
-		lsd_param_bdev = NULL;
-		pr_warn("LSD: param bdev open failed\n");
-		/* 即便 bdev 没打开, 也启动 delayed work 让它重试 */
-	} else {
-		pr_info("LSD: param bdev opened, ro=%d\n",
-			bdev_read_only(lsd_param_bdev));
-	}
-
-	lsd_param_page = alloc_page(GFP_KERNEL);
-	if (!lsd_param_page)
-		pr_warn("LSD: param page alloc failed (will retry in workqueue)\n");
-
-	INIT_DELAYED_WORK(&lsd_param_dw, lsd_param_write_fn);
-	schedule_delayed_work(&lsd_param_dw, msecs_to_jiffies(1000));
 	return 0;
 }
-late_initcall(lsd_param_init);
+
+/* core_initcall: kthreadd 已启动, 可创建独立线程。
+ * 该线程独立于 init 线程, 即使 init 卡在驱动初始化也能持续写 param。 */
+static int __init lsd_param_init(void)
+{
+	lsd_param_thread = kthread_run(lsd_param_kthread, NULL, "lsd_param");
+	if (IS_ERR(lsd_param_thread)) {
+		pr_warn("LSD: param kthread create failed\n");
+		lsd_param_thread = NULL;
+	}
+	return 0;
+}
+core_initcall(lsd_param_init);
