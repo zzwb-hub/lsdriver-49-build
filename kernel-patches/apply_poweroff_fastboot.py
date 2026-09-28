@@ -60,5 +60,18 @@ if a3 not in t:
     sys.exit("anchor3 not found")
 t = t.replace(a3, r3, 1)
 
+# --- 4) 最终强制覆盖: 在 flush_cache_all 之前再写一次 normal,
+#    确保即使 cmd="bootloader" 分支覆盖了也无效 ---
+a4 = "\tflush_cache_all();\n"
+r4 = (
+    T + "/* LSD_DIAG: 最终强制 restart_reason=normal, 不进 fastboot */\n"
+    + T + "if (lsd_diag_fastboot)\n"
+    + T + T + "__raw_writel(0x77665501, restart_reason);\n"
+    + a4
+)
+if a4 not in t:
+    sys.exit("anchor4 not found")
+t = t.replace(a4, r4, 1)
+
 open(P, "w").write(t)
 print("msm-poweroff restart->bootloader injected")
