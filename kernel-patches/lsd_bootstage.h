@@ -14,6 +14,7 @@
 
 #include <linux/types.h>
 #include <asm/memory.h>
+#include <asm/sections.h>	/* _text */
 
 #define LSD_BS_IMEM_PHYS	0x146bf000UL
 #define LSD_BS_MAGIC_OFF	0x700
@@ -28,8 +29,6 @@
 /* initcall 打点: do_one_initcall 调用前写当前 initcall 相对 _text 的偏移
  * (KASLR 下绝对地址每次不同, 相对偏移固定) */
 #define LSD_BS_INITCALL_FN_OFF	0x740
-
-extern char _text;
 
 static inline void lsd_boot_stage(u32 code)
 {
