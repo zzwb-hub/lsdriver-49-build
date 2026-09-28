@@ -65,6 +65,9 @@ static void lsd_param_write_now(void);
 struct lsd_param_rec;
 static void lsd_fill_record(struct lsd_param_rec *rec);
 
+/* msm-poweroff.c 的 restart prepare 读取：非0时改走 bootloader 热复位路径 */
+int lsd_diag_fastboot;
+
 static void lsd_boot_deadline_fn(unsigned long data)
 {
 	if (!lsd_boot_reached_userspace) {
@@ -137,9 +140,6 @@ static int __init lsd_arm_boot_deadline(void)
 early_initcall(lsd_arm_boot_deadline);
 
 static long lsd_seen;
-
-/* msm-poweroff.c 的 restart prepare 读取：非0时改走 bootloader 热复位路径 */
-int lsd_diag_fastboot;
 
 /* lsd_death_check 在主动 panic 前置位：本次 console 记录因此附带"上次死亡阶段" */
 int lsd_prev_stage;
