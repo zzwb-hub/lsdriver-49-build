@@ -68,6 +68,12 @@ static void lsd_fill_record(struct lsd_param_rec *rec);
 static void lsd_boot_deadline_fn(unsigned long data)
 {
 	if (!lsd_boot_reached_userspace) {
+		/* 强制 restart_reason=normal(0x77665501): 热复位后 bootloader
+		 * 自动启动当前槽(a 槽)第二次, 不进 fastboot。
+		 * 直接写 IMEM, 不依赖 lsd_diag_fastboot 路径是否生效。 */
+		*(u32 *)__phys_to_virt(0x146bf65cUL) = 0x77665501;
+		__flush_dcache_area((void *)__phys_to_virt(0x146bf65cUL), 4);
+		lsd_diag_fastboot = 1;
 		/* 紧急写入: 定时器软中断里一定能跑, 即使 workqueue 全卡死 */
 		lsd_param_write_now();
 		panic("LSD: boot deadline %dms exceeded - progress stall during init",
