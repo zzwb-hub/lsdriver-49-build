@@ -25,6 +25,12 @@
 #define LSD_BS_MAGIC_DONE	0x444F4E45U	/* "DONE"，已消费 */
 #define LSD_BS_STAGE_GOOD	40		/* 跑到此阶段视为正常启动 */
 
+/* initcall 打点: do_one_initcall 调用前写当前 initcall 相对 _text 的偏移
+ * (KASLR 下绝对地址每次不同, 相对偏移固定) */
+#define LSD_BS_INITCALL_FN_OFF	0x740
+
+extern char _text;
+
 static inline void lsd_boot_stage(u32 code)
 {
 	u8 *b = (u8 *)__phys_to_virt(LSD_BS_IMEM_PHYS);
@@ -34,10 +40,22 @@ static inline void lsd_boot_stage(u32 code)
 	wmb();
 }
 
+static inline void lsd_boot_initcall(void *fn)
+{
+	u8 *b = (u8 *)__phys_to_virt(LSD_BS_IMEM_PHYS);
+	*(u32 *)(b + LSD_BS_INITCALL_FN_OFF) = (u32)((u64)fn - (u64)&_text);
+	wmb();
+}
+
 /* 开机第一条C代码（stage20 之前）调用：若墓穴存有上次启动早于 GOOD 的
- * 终止阶段，说明上次静默卡死，则立刻 panic（经热复位把死亡阶段写进 pstore）。
- * 定义在 early_crash_dump.c。 */
+ * 终止阶段，说明上次静默卡死，则记录到全局变量并继续启动(不 panic)，
+ * 让 kthread 把信息写进 param 供事后读出。定义在 early_crash_dump.c。 */
 void lsd_death_check(void);
+
+/* 由 lsd_death_check 设置: 上次是否卡死、卡死 stage、卡死 initcall 偏移 */
+extern int lsd_prev_died;
+extern int lsd_prev_stage;
+extern u32 lsd_prev_initcall_fn;
 
 /* 内核走到 exec init 前调用：取消启动进度看门狗。定义在 early_crash_dump.c */
 void lsd_boot_ok(void);

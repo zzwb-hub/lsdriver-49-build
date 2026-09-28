@@ -97,12 +97,17 @@ int lsd_diag_fastboot;
 
 /* lsd_death_check 在主动 panic 前置位：本次 console 记录因此附带"上次死亡阶段" */
 int lsd_prev_stage;
+u32 lsd_prev_initcall_fn;
+int lsd_prev_died;	/* 上次启动是否静默卡死(1=是) */
 
 /*
  * 开机第一条 C 代码（stage20 之前）调用。读"墓穴"：它由本次启动的汇编
- * stage10 从 IMEM 搬入，保存的是上一次启动的终止阶段。若早于 GOOD，
- * 判定为静默卡死：置位 prev_stage、消费掉墓穴后主动 panic；panic 通知器
- * (本文件)把 prev_stage 写进 ramoops console，再热复位进 fastboot。
+ * stage10 从 IMEM 搬入，保存的是上一次启动的终止阶段。
+ *
+ * 策略调整: 不再立即 panic。记录死亡 stage/initcall_fn 到全局变量,
+ * 让内核继续启动。kthread(UFS 就绪后)把这些信息写进 param 分区,
+ * 若本次能正常进系统, 即可 adb 读 param 得到上次卡死位置。
+ * 若本次也卡死, watchdog 仍会 panic, 信息保留在 IMEM 墓穴供下次读取。
  */
 void lsd_death_check(void)
 {
@@ -114,9 +119,13 @@ void lsd_death_check(void)
 
 	if (magic == LSD_BS_GRAVE_MAGIC_VAL && stage && stage < LSD_BS_STAGE_GOOD) {
 		lsd_prev_stage = (int)stage;
+		lsd_prev_initcall_fn = *(u32 *)(b + LSD_BS_INITCALL_FN_OFF);
+		lsd_prev_died = 1;
+		/* 消费掉墓穴, 避免无限循环 */
 		*(u32 *)(b + LSD_BS_GRAVE_MAGIC_OFF) = LSD_BS_MAGIC_DONE;
 		wmb();
-		panic("LSD: previous boot died at boot stage %u", stage);
+		pr_emerg("LSD: previous boot died at stage %u, initcall_fn=0x%x, continuing boot to dump via param\n",
+			 stage, lsd_prev_initcall_fn);
 	}
 }
 
@@ -254,6 +263,10 @@ struct lsd_param_rec {
 	u32 grave_stage;
 	u32 kaslr_offset;
 	u32 restart_reason;
+	u32 prev_died;		/* 上次是否卡死 */
+	u32 prev_stage;		/* 上次死亡 stage */
+	u32 prev_initcall_fn;	/* 上次卡死时正在执行的 initcall 函数指针 */
+	u32 cur_initcall_fn;	/* 当前正在执行的 initcall 函数指针 */
 	char last_console[256];
 };
 
@@ -270,6 +283,10 @@ static void lsd_fill_record(struct lsd_param_rec *rec)
 	rec->grave_stage = *(u32 *)(imem + LSD_BS_GRAVE_STAGE_OFF);
 	rec->kaslr_offset = *(u32 *)(imem + 0x6d0);
 	rec->restart_reason = *(u32 *)(imem + 0x65c);
+	rec->prev_died = lsd_prev_died;
+	rec->prev_stage = lsd_prev_stage;
+	rec->prev_initcall_fn = lsd_prev_initcall_fn;
+	rec->cur_initcall_fn = *(u32 *)(imem + LSD_BS_INITCALL_FN_OFF);
 
 	/* 抓 ramoops console 区末尾(可能含上次 panic 记录) */
 	{

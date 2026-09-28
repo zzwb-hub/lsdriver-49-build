@@ -88,6 +88,22 @@ rep(
     "rest_init entry",
 )
 
+# initcall 打点: do_initcall_level 循环里, 每个 initcall 调用前记录函数指针
+# 若上次启动卡死在此 initcall, 则跳过它以保证本次能启动到 UFS 就绪, kthread 可写 param
+rep(
+    T + "for (fn = initcall_levels[level]; fn < initcall_levels[level+1]; fn++)\n"
+    + T + T + "do_one_initcall(*fn);\n",
+    T + "for (fn = initcall_levels[level]; fn < initcall_levels[level+1]; fn++) {\n"
+    + T + T + "lsd_boot_initcall(*fn);\n"
+    + T + T + "if (lsd_prev_died && lsd_prev_initcall_fn == (u32)((u64)*fn - (u64)&_text)) {\n"
+    + T + T + T + "pr_emerg(\"LSD: skipping initcall %pF (previous boot died here)\\n\", *fn);\n"
+    + T + T + T + "continue;\n"
+    + T + T + "}\n"
+    + T + T + "do_one_initcall(*fn);\n"
+    + T + "}\n",
+    "do_initcall_level loop",
+)
+
 # 40 in kernel_init, right before executing userspace init; reaching here means
 # all driver initcalls completed -> cancel the boot-progress deadline.
 rep(
