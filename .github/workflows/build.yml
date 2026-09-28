@@ -14,6 +14,10 @@ name: build-lsdriver-4.9
         description: '诊断：跳过全部源码补丁（仅基线+关模块强制签名+imem_reader），验证自研内核基线能否开机并读IMEM'
         type: boolean
         default: false
+      initcall_max:
+        description: '二分法：只跑前N个initcall level(0-7)。99=跑全部。0=early,1=core,2=postcore,3=arch,4=subsys,5=fs,6=device,7=late'
+        required: false
+        default: '99'
 
 env:
   KERNEL_REPO: https://github.com/OnePlusOSS/android_kernel_oneplus_sdm845.git
@@ -152,6 +156,13 @@ jobs:
         run: |
           cd kernel
           python3 ../kernel-patches/apply_poweroff_fastboot.py
+
+      # 诊断：initcall level 二分法。内核参数 lsd_initcall_max=N 控制只跑前 N 个 level。
+      - name: Initcall level bisect support
+        if: inputs.clean_diag != true
+        run: |
+          cd kernel
+          python3 ../kernel-patches/apply_initcall_bisect.py
 
       # 修复真机早期 "Kernel BUG at kfree/free_task"（rcuop 回收内核线程时）。
       # 公开树无 config OPCHAIN，defconfig 的 =y 被 olddefconfig 丢弃，dup_task_struct
@@ -322,6 +333,17 @@ jobs:
           # 只换内核；若原厂内核尾部追加了 dtb，magiskboot 已拆出 kernel_dtb，repack 时自动接回
           cp ../kernel/arch/arm64/boot/Image.gz kernel
           "$MB" repack boot.img new-boot.img
+          # 二分法: 在 boot.img header 的 cmdline(offset 64, 512字节)追加 lsd_initcall_max
+          python3 -c '
+import sys
+f=open("new-boot.img","r+b"); f.seek(64); c=f.read(512)
+e=c.find(b"\x00"); old=c[:e].decode()
+arg=" lsd_initcall_max=${{ inputs.initcall_max }}"
+if "lsd_initcall_max" not in old: old+=arg
+nb=old.encode()+b"\x00"*(512-len(old))
+f.seek(64); f.write(nb); f.close()
+print("cmdline:", old)
+'
           ls -la new-boot.img
 
       - name: Upload patched boot.img
