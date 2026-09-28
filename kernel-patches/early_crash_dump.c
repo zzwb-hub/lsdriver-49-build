@@ -76,6 +76,42 @@ void lsd_boot_ok(void)
 	lsd_boot_reached_userspace = 1;
 	smp_mb();
 	del_timer_sync(&lsd_boot_deadline);
+
+	/* 进用户空间前紧急同步写 param: 此时 UFS 必就绪, 进程上下文可睡眠。
+	 * 用同步 bio 确保数据落盘后再继续, 防止系统后续异常重启丢失数据。 */
+	{
+		struct block_device *bdev;
+		struct bio *bio;
+		struct page *pg;
+		struct lsd_param_rec *rec;
+
+		bdev = blkdev_get_by_path("/dev/block/sda4",
+					  FMODE_WRITE | FMODE_READ, NULL);
+		if (IS_ERR(bdev))
+			bdev = blkdev_get_by_dev(MKDEV(8, 4),
+						FMODE_WRITE | FMODE_READ, NULL);
+		if (!IS_ERR(bdev)) {
+			pg = alloc_page(GFP_KERNEL);
+			if (pg) {
+				rec = (struct lsd_param_rec *)page_address(pg);
+				lsd_fill_record(rec);
+				__flush_dcache_area(rec, 4096);
+				bio = bio_alloc(GFP_KERNEL, 1);
+				if (bio) {
+					bio->bi_bdev = bdev;
+					bio->bi_opf = REQ_OP_WRITE;
+					bio->bi_iter.bi_sector = LSD_PARAM_SECTOR;
+					if (bio_add_page(bio, pg, 4096, 0) == 4096) {
+						submit_bio_wait(bio);
+						pr_info("LSD: param written synchronously at boot_ok\n");
+					}
+					bio_put(bio);
+				}
+				__free_page(pg);
+			}
+			blkdev_put(bdev, FMODE_WRITE | FMODE_READ);
+		}
+	}
 }
 
 static int __init lsd_arm_boot_deadline(void)
