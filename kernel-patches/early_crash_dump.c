@@ -23,6 +23,7 @@
 #include <asm/memory.h>
 #include <asm/ptrace.h>
 #include <asm/cacheflush.h>
+#include <linux/lsd_bootstage.h>
 
 #define LSD_CONSOLE_PHYS	0xAC440000UL
 #define LSD_CONSOLE_CAP		0x40000UL	/* 含12字节头 */
@@ -44,6 +45,31 @@ static long lsd_seen;
 
 /* msm-poweroff.c 的 restart prepare 读取：非0时改走 bootloader 热复位路径 */
 int lsd_diag_fastboot;
+
+/* lsd_death_check 在主动 panic 前置位：本次 console 记录因此附带"上次死亡阶段" */
+int lsd_prev_stage;
+
+/*
+ * 开机第一条 C 代码（stage20 之前）调用。读"墓穴"：它由本次启动的汇编
+ * stage10 从 IMEM 搬入，保存的是上一次启动的终止阶段。若早于 GOOD，
+ * 判定为静默卡死：置位 prev_stage、消费掉墓穴后主动 panic；panic 通知器
+ * (本文件)把 prev_stage 写进 ramoops console，再热复位进 fastboot。
+ */
+void lsd_death_check(void)
+{
+	u8 *b = (u8 *)__phys_to_virt(LSD_BS_IMEM_PHYS);
+	u32 magic, stage;
+
+	magic = *(u32 *)(b + LSD_BS_GRAVE_MAGIC_OFF);
+	stage = *(u32 *)(b + LSD_BS_GRAVE_STAGE_OFF);
+
+	if (magic == LSD_BS_GRAVE_MAGIC_VAL && stage && stage < LSD_BS_STAGE_GOOD) {
+		lsd_prev_stage = (int)stage;
+		*(u32 *)(b + LSD_BS_GRAVE_MAGIC_OFF) = LSD_BS_MAGIC_DONE;
+		wmb();
+		panic("LSD: previous boot died at boot stage %u", stage);
+	}
+}
 
 static char *lx64(char *p, u64 v)
 {
@@ -79,6 +105,8 @@ void lsd_capture(struct pt_regs *regs)
 	p += sprintf(p, "cpu=%u irq=%u pid=%ld comm=%s\n",
 		     smp_processor_id(), in_interrupt() ? 1 : 0,
 		     (long)current->pid, current->comm);
+	if (lsd_prev_stage)
+		p += sprintf(p, "prev_death_stage=%d\n", lsd_prev_stage);
 	if (regs) {
 		p += sprintf(p, "pc="); p = lx64(p, regs->pc); *p++ = '\n';
 		p += sprintf(p, "lr="); p = lx64(p, regs->regs[30]); *p++ = '\n';

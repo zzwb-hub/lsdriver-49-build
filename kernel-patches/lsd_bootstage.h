@@ -18,7 +18,12 @@
 #define LSD_BS_IMEM_PHYS	0x146bf000UL
 #define LSD_BS_MAGIC_OFF	0x700
 #define LSD_BS_STAGE_OFF	0x708
+#define LSD_BS_GRAVE_MAGIC_OFF	0x70c
+#define LSD_BS_GRAVE_STAGE_OFF	0x710
 #define LSD_BS_MAGIC_VAL	0xB007B007U
+#define LSD_BS_GRAVE_MAGIC_VAL	0x47524156U	/* "GRAV" */
+#define LSD_BS_MAGIC_DONE	0x444F4E45U	/* "DONE"，已消费 */
+#define LSD_BS_STAGE_GOOD	40		/* 跑到此阶段视为正常启动 */
 
 static inline void lsd_boot_stage(u32 code)
 {
@@ -28,5 +33,10 @@ static inline void lsd_boot_stage(u32 code)
 	*(u32 *)(b + LSD_BS_STAGE_OFF) = code;
 	wmb();
 }
+
+/* 开机第一条C代码（stage20 之前）调用：若墓穴存有上次启动早于 GOOD 的
+ * 终止阶段，说明上次静默卡死，则立刻 panic（经热复位把死亡阶段写进 pstore）。
+ * 定义在 early_crash_dump.c。 */
+void lsd_death_check(void);
 
 #endif /* _LSD_BOOTSTAGE_H */

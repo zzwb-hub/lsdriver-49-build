@@ -13,7 +13,29 @@ if MARK in t:
     sys.exit(0)
 
 macro = (
-    "/* " + MARK + ": write magic+code to IMEM phys 0x146bf000 (MMU off, safe) */\n"
+    "/* " + MARK + ": boot-stage markers in IMEM phys 0x146bf000 (MMU off) */\n"
+    # first marker of a boot: preserve previous boot's stage into the grave
+    + "/* first marker: copy prior stage into grave before overwriting */\n"
+    + ".macro\tlsd_stage_first code\n"
+    + "movz\tx9, #0xf000\n"
+    + "movk\tx9, #0x146b, lsl #16\n"
+    + "ldr\tw10, [x9, #0x700]\n"
+    + "movz\tw11, #0xb007\n"
+    + "movk\tw11, #0xb007, lsl #16\n"
+    + "cmp\tw10, w11\n"
+    + "b.ne\t98f\n"
+    + "ldr\tw12, [x9, #0x708]\n"
+    + "movz\tw10, #0x4156\n"
+    + "movk\tw10, #0x4752, lsl #16\n"
+    + "str\tw10, [x9, #0x70c]\n"
+    + "str\tw12, [x9, #0x710]\n"
+    + "98:\n"
+    + "str\tw11, [x9, #0x700]\n"
+    + "mov\tw10, #\\code\n"
+    + "str\tw10, [x9, #0x708]\n"
+    + "dsb\tsy\n"
+    + ".endm\n"
+    # normal marker
     + ".macro\tlsd_stage code\n"
     + "movz\tx9, #0xf000\n"
     + "movk\tx9, #0x146b, lsl #16\n"
@@ -26,7 +48,7 @@ macro = (
     + ".endm\n"
 )
 
-# 1) macro + stext 10..12
+# 1) macros + stext 10(first)/11/12
 old1 = (
     "ENTRY(stext)\n"
     + T + "bl\tpreserve_boot_args\n"
@@ -35,7 +57,7 @@ old1 = (
 new1 = (
     macro
     + "ENTRY(stext)\n"
-    + T + "lsd_stage\t10\n"
+    + T + "lsd_stage_first\t10\n"
     + T + "bl\tpreserve_boot_args\n"
     + T + "lsd_stage\t11\n"
     + T + "bl\tel2_setup\t\t\t// Drop to EL1, w0=cpu_boot_mode\n"

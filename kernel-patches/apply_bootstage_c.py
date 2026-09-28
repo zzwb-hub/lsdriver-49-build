@@ -28,7 +28,8 @@ rep(
     "top include",
 )
 
-# stage 20
+# death self-check (must precede stage 20; reads the grave prepared by asm 10)
+# + stage 20
 rep(
     "asmlinkage __visible void __init start_kernel(void)\n"
     "{\n"
@@ -38,6 +39,7 @@ rep(
     "{\n"
     + T + "char *command_line;\n"
     + T + "char *after_dashes;\n\n"
+    + T + "lsd_death_check();\n"
     + T + "lsd_boot_stage(20);\n",
     "start_kernel head",
 )
@@ -87,5 +89,15 @@ rep(
     "rest_init entry",
 )
 
+# 40 in kernel_init, right before executing userspace init
+rep(
+    T + "rcu_end_inkernel_boot();\n\n"
+    + T + "if (ramdisk_execute_command) {\n",
+    T + "rcu_end_inkernel_boot();\n\n"
+    + T + "lsd_boot_stage(40);\n"
+    + T + "if (ramdisk_execute_command) {\n",
+    "kernel_init stage 40",
+)
+
 open(P, "w").write(t)
-print("main.c boot stages 20-29 injected")
+print("main.c boot stages 20-40 injected")
