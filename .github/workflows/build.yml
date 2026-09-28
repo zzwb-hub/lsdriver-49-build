@@ -240,7 +240,8 @@ jobs:
               --enable LOCKUP_DETECTOR \
               --enable BOOTPARAM_SOFTLOCKUP_PANIC \
               --enable BOOTPARAM_HARDLOCKUP_PANIC \
-              --enable PANIC_ON_RECURSIVE_FAULT || true
+              --enable PANIC_ON_RECURSIVE_FAULT \
+              --enable INITCALL_DEBUG || true
           fi
           make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- olddefconfig
           if grep -q '^# CONFIG_MODULE_SIG_FORCE is not set' .config; then echo "SIG_FORCE=off"; else echo "SIG_FORCE=STILL ON"; fi
