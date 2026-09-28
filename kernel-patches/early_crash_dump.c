@@ -56,11 +56,17 @@ struct pram {
 static struct timer_list lsd_boot_deadline;
 static int lsd_boot_reached_userspace;
 
+/* 前向声明: 定义在文件后部 param 写入器 */
+static void lsd_param_write_now(void);
+
 static void lsd_boot_deadline_fn(unsigned long data)
 {
-	if (!lsd_boot_reached_userspace)
+	if (!lsd_boot_reached_userspace) {
+		/* 紧急写入: 定时器软中断里一定能跑, 即使 workqueue 全卡死 */
+		lsd_param_write_now();
 		panic("LSD: boot deadline %dms exceeded - progress stall during init",
 		      LSD_BOOT_DEADLINE_MS);
+	}
 }
 
 void lsd_boot_ok(void)
@@ -232,10 +238,11 @@ static int __init lsd_early_init(void)
 }
 pure_initcall(lsd_early_init);
 
-/* ---- param 分区写入器：周期性写 boot stage 到 param 分区，
- * b 槽正常系统可用 dd 读出。卡死时 delayed work 停止，
- * param 里存的就是卡死前最后的 stage。
- * 从 early_initcall 启动，重试到 UFS 驱动就绪为止。 ---- */
+/* ---- param 分区写入器 ----
+ * 把 boot stage + 控制台末尾写入 param 分区(UFS 持久存储), b 槽可 dd 读出。
+ * 关键设计: 写入函数可在任意上下文(含定时器软中断)调用, 用异步 bio + mdelay。
+ * bdev 在 late_initcall 预打开(进程上下文可睡眠); 若晚于卡死点则定时器直接
+ * 跳过写入(仅留 IMEM stage, 下次启动靠 lsd_death_check 读出)。 */
 #define LSD_PARAM_SECTOR	16	/* offset 0x2000, 避开 BCB */
 #define LSD_PARAM_MAGIC	0x4C534450U	/* "LSDP" */
 
@@ -245,53 +252,25 @@ struct lsd_param_rec {
 	u32 grave_stage;
 	u32 kaslr_offset;
 	u32 restart_reason;
-	char last_console[128];
+	char last_console[256];
 };
 
 static struct block_device *lsd_param_bdev;
 static struct page *lsd_param_page;
 static struct delayed_work lsd_param_dw;
 
-static void lsd_param_write_fn(struct work_struct *work)
+static void lsd_fill_record(struct lsd_param_rec *rec)
 {
-	struct bio *bio;
-	struct lsd_param_rec *rec;
 	u8 *imem = (u8 *)__phys_to_virt(LSD_BS_IMEM_PHYS);
 
-	/* 懒初始化：UFS 未就绪时重试 */
-	if (!lsd_param_bdev) {
-		lsd_param_bdev = blkdev_get_by_path("/dev/block/sda4",
-						    FMODE_WRITE | FMODE_READ, NULL);
-		if (IS_ERR(lsd_param_bdev))
-			lsd_param_bdev = blkdev_get_by_dev(MKDEV(8, 4),
-							   FMODE_WRITE | FMODE_READ, NULL);
-		if (IS_ERR(lsd_param_bdev)) {
-			lsd_param_bdev = NULL;
-			goto resched;
-		}
-		if (!lsd_param_page) {
-			lsd_param_page = alloc_page(GFP_NOIO);
-			if (!lsd_param_page) {
-				blkdev_put(lsd_param_bdev, FMODE_WRITE | FMODE_READ);
-				lsd_param_bdev = NULL;
-				goto resched;
-			}
-		}
-	}
-
-	if (!lsd_param_page)
-		goto resched;
-
-	rec = (struct lsd_param_rec *)page_address(lsd_param_page);
 	memset(rec, 0, 4096);
-
 	rec->magic = LSD_PARAM_MAGIC;
 	rec->cur_stage = *(u32 *)(imem + LSD_BS_STAGE_OFF);
 	rec->grave_stage = *(u32 *)(imem + LSD_BS_GRAVE_STAGE_OFF);
 	rec->kaslr_offset = *(u32 *)(imem + 0x6d0);
 	rec->restart_reason = *(u32 *)(imem + 0x65c);
 
-	/* 从 console 区抓最后几行（若有上一次 panic 的记录） */
+	/* 抓 ramoops console 区末尾(可能含上次 panic 记录) */
 	{
 		struct pram *pr = (struct pram *)__phys_to_virt(LSD_CONSOLE_PHYS);
 		if (pr->sig == DBGC && pr->size > 0 && pr->size < LSD_TXT_SZ) {
@@ -300,29 +279,81 @@ static void lsd_param_write_fn(struct work_struct *work)
 			memcpy(rec->last_console, pr->data + pr->size - copylen, copylen);
 		}
 	}
+}
 
-	bio = bio_alloc(GFP_NOIO, 1);
+/* 可在任意上下文调用: 异步提交 bio, mdelay 忙等完成 */
+static void lsd_param_write_now(void)
+{
+	struct bio *bio;
+	struct lsd_param_rec *rec;
+
+	if (!lsd_param_bdev || !lsd_param_page)
+		return;
+
+	rec = (struct lsd_param_rec *)page_address(lsd_param_page);
+	lsd_fill_record(rec);
+	__flush_dcache_area(rec, 4096);
+
+	bio = bio_alloc(GFP_ATOMIC, 1);
 	if (!bio)
-		goto resched;
+		return;
 	bio->bi_bdev = lsd_param_bdev;
-	bio->bi_opf = REQ_OP_WRITE | REQ_SYNC;
+	bio->bi_opf = REQ_OP_WRITE;
 	bio->bi_iter.bi_sector = LSD_PARAM_SECTOR;
 	if (bio_add_page(bio, lsd_param_page, 4096, 0) < 4096) {
 		bio_put(bio);
-		goto resched;
+		return;
 	}
-	submit_bio_wait(bio);
-	bio_put(bio);
+	submit_bio(bio);
+	/* 忙等: UFS 控制器独立于 CPU, 即使内核线程全卡死也能完成 IO */
+	mdelay(50);
+}
 
-resched:
+static void lsd_param_write_fn(struct work_struct *work)
+{
+	/* 兜底: 若 late_initcall 时 bdev 未就绪, 在这里重试打开 */
+	if (!lsd_param_bdev) {
+		lsd_param_bdev = blkdev_get_by_path("/dev/block/sda4",
+						    FMODE_WRITE | FMODE_READ, NULL);
+		if (IS_ERR(lsd_param_bdev))
+			lsd_param_bdev = blkdev_get_by_dev(MKDEV(8, 4),
+							   FMODE_WRITE | FMODE_READ, NULL);
+		if (IS_ERR(lsd_param_bdev))
+			lsd_param_bdev = NULL;
+		else
+			pr_info("LSD: param bdev opened (workqueue), ro=%d\n",
+				bdev_read_only(lsd_param_bdev));
+	}
+	if (!lsd_param_page)
+		lsd_param_page = alloc_page(GFP_NOIO);
+
+	lsd_param_write_now();
 	schedule_delayed_work(&lsd_param_dw, msecs_to_jiffies(2000));
 }
 
+/* late_initcall: 进程上下文打开 bdev + 分配页 */
 static int __init lsd_param_init(void)
 {
+	lsd_param_bdev = blkdev_get_by_path("/dev/block/sda4",
+					    FMODE_WRITE | FMODE_READ, NULL);
+	if (IS_ERR(lsd_param_bdev))
+		lsd_param_bdev = blkdev_get_by_dev(MKDEV(8, 4),
+						   FMODE_WRITE | FMODE_READ, NULL);
+	if (IS_ERR(lsd_param_bdev)) {
+		lsd_param_bdev = NULL;
+		pr_warn("LSD: param bdev open failed\n");
+		/* 即便 bdev 没打开, 也启动 delayed work 让它重试 */
+	} else {
+		pr_info("LSD: param bdev opened, ro=%d\n",
+			bdev_read_only(lsd_param_bdev));
+	}
+
+	lsd_param_page = alloc_page(GFP_KERNEL);
+	if (!lsd_param_page)
+		pr_warn("LSD: param page alloc failed (will retry in workqueue)\n");
+
 	INIT_DELAYED_WORK(&lsd_param_dw, lsd_param_write_fn);
-	schedule_delayed_work(&lsd_param_dw, msecs_to_jiffies(2000));
-	pr_info("LSD: param writer scheduled\n");
+	schedule_delayed_work(&lsd_param_dw, msecs_to_jiffies(1000));
 	return 0;
 }
-early_initcall(lsd_param_init);
+late_initcall(lsd_param_init);
