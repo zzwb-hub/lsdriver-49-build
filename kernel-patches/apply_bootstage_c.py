@@ -28,8 +28,7 @@ rep(
     "top include",
 )
 
-# death self-check (must precede stage 20; reads the grave prepared by asm 10)
-# + stage 20
+# unconditional probe FIRST (temporary), then death self-check, then stage 20
 rep(
     "asmlinkage __visible void __init start_kernel(void)\n"
     "{\n"
@@ -39,6 +38,7 @@ rep(
     "{\n"
     + T + "char *command_line;\n"
     + T + "char *after_dashes;\n\n"
+    + T + "lsd_probe();\n"
     + T + "lsd_death_check();\n"
     + T + "lsd_boot_stage(20);\n",
     "start_kernel head",

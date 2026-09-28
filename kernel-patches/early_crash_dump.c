@@ -71,6 +71,24 @@ void lsd_death_check(void)
 	}
 }
 
+/* ---- 无条件探针（临时）：跑到第一条C代码即 dump IMEM 并 panic ---- */
+int lsd_probe_active;
+u32 lsd_pb[6];
+
+void lsd_probe(void)
+{
+	u8 *b = (u8 *)__phys_to_virt(LSD_BS_IMEM_PHYS);
+
+	lsd_pb[0] = *(u32 *)(b + 0x700);	/* cur magic */
+	lsd_pb[1] = *(u32 *)(b + 0x708);	/* cur stage */
+	lsd_pb[2] = *(u32 *)(b + 0x70c);	/* grave magic */
+	lsd_pb[3] = *(u32 *)(b + 0x710);	/* grave stage */
+	lsd_pb[4] = *(u32 *)(b + 0x65c);	/* restart reason */
+	lsd_pb[5] = *(u32 *)(b + 0x6d0);	/* kaslr */
+	lsd_probe_active = 1;
+	panic("LSD PROBE: reached first C code (see imem dump)");
+}
+
 static char *lx64(char *p, u64 v)
 {
 	int i;
@@ -107,6 +125,11 @@ void lsd_capture(struct pt_regs *regs)
 		     (long)current->pid, current->comm);
 	if (lsd_prev_stage)
 		p += sprintf(p, "prev_death_stage=%d\n", lsd_prev_stage);
+	if (lsd_probe_active) {
+		p += sprintf(p, "IMEM cur_magic=0x%08x cur_stage=%u\n", lsd_pb[0], lsd_pb[1]);
+		p += sprintf(p, "IMEM grave_magic=0x%08x grave_stage=%u\n", lsd_pb[2], lsd_pb[3]);
+		p += sprintf(p, "IMEM restart_reason=0x%08x kaslr=0x%08x\n", lsd_pb[4], lsd_pb[5]);
+	}
 	if (regs) {
 		p += sprintf(p, "pc="); p = lx64(p, regs->pc); *p++ = '\n';
 		p += sprintf(p, "lr="); p = lx64(p, regs->regs[30]); *p++ = '\n';
