@@ -10,6 +10,10 @@ name: build-lsdriver-4.9
         description: 'vermagic 后缀。defconfig 已带 -perf，默认填 + 使结果为 4.9.179-perf+（对齐 adb shell uname -r）'
         required: false
         default: '+'
+      clean_diag:
+        description: '诊断：跳过全部源码补丁（仅基线+关模块强制签名+imem_reader），验证自研内核基线能否开机并读IMEM'
+        type: boolean
+        default: false
 
 env:
   KERNEL_REPO: https://github.com/OnePlusOSS/android_kernel_oneplus_sdm845.git
@@ -129,12 +133,14 @@ jobs:
 
       # 诊断：极早期 panic 捕获器（ramoops 就绪前直接写物理内存），恢复端扫 magic 读栈
       - name: Add early crash dumper
+        if: inputs.clean_diag != true
         run: |
           cp kernel-patches/early_crash_dump.c kernel/drivers/oneplus/early_crash_dump.c
           echo 'obj-y += early_crash_dump.o' >> kernel/drivers/oneplus/Makefile
 
       # 诊断：traps.c 在 panic 前调用 lsd_capture(regs)，确保拿到寄存器现场
       - name: Hook traps oops_end to lsd_capture
+        if: inputs.clean_diag != true
         run: |
           cd kernel
           python3 ../kernel-patches/apply_traps_capture.py
@@ -142,6 +148,7 @@ jobs:
       # 诊断：panic 重启改走 bootloader 热复位（清dload magic + 0x77665500），
       # 自动进 fastboot 且 RAM 不断电，恢复后 pstore 记录仍在
       - name: Make panic warm-reboot into fastboot
+        if: inputs.clean_diag != true
         run: |
           cd kernel
           python3 ../kernel-patches/apply_poweroff_fastboot.py
@@ -154,9 +161,10 @@ jobs:
           cd kernel
           python3 ../kernel-patches/apply_nn_init.py
 
-      # 诊断：抓"静默卡死"（无panic、无USB、屏幕冻结）。在内核启动各阶段往 IMEM
+      # 诊断：抓"静默卡死"（panic、无USB、屏幕冻结）。在内核启动各阶段往 IMEM
       # 写进度编号，冷启动后用 imem_reader 模块读出，确定死亡位置。
       - name: Add IMEM boot-stage tracing
+        if: inputs.clean_diag != true
         run: |
           cp kernel-patches/lsd_bootstage.h kernel/include/linux/lsd_bootstage.h
           cd kernel
@@ -226,11 +234,14 @@ jobs:
           # 开启 soft/hard lockup 检测器并设为检测到即 panic —— panic 即走现有热复位链路，
           # RAM保住、自动进fastboot，console区留下卡死瞬间的最后日志与现场。
           # watchdog_thresh默认10：soft lockup 20s触发，hard lockup 10s触发。
-          scripts/config --enable DEBUG_KERNEL \
-            --enable LOCKUP_DETECTOR \
-            --enable BOOTPARAM_SOFTLOCKUP_PANIC \
-            --enable BOOTPARAM_HARDLOCKUP_PANIC \
-            --enable PANIC_ON_RECURSIVE_FAULT || true
+          # clean_diag 模式下不启用（干净内核不带这些诊断配置）。
+          if [ "${{ inputs.clean_diag }}" != "true" ]; then
+            scripts/config --enable DEBUG_KERNEL \
+              --enable LOCKUP_DETECTOR \
+              --enable BOOTPARAM_SOFTLOCKUP_PANIC \
+              --enable BOOTPARAM_HARDLOCKUP_PANIC \
+              --enable PANIC_ON_RECURSIVE_FAULT || true
+          fi
           make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- olddefconfig
           if grep -q '^# CONFIG_MODULE_SIG_FORCE is not set' .config; then echo "SIG_FORCE=off"; else echo "SIG_FORCE=STILL ON"; fi
           grep -q '^CONFIG_PSTORE_RAM=y' .config && echo 'PSTORE_RAM=y'
