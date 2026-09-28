@@ -206,11 +206,14 @@ jobs:
           # kbuild 默认不把源码目录加入 -I，追加 -I$(src)（对子目录同样生效）
           python3 -c 'p="drivers/gpu/msm/Makefile"; t=open(p).read(); t += "\nccflags-y += -I$(src)\n"; open(p,"w").write(t)'
 
-      - name: Configure kernel (sdm845-perf_defconfig)
+      - name: Configure kernel (stock_sdm845.config)
         run: |
           cd kernel
-          make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- sdm845-perf_defconfig
-          # defconfig 自带 CONFIG_LOCALVERSION="-perf"；关闭 SCM 自动后缀，保证可复现
+          # 用 stock 内核的完整 .config 代替 sdm845-perf_defconfig，
+          # 最大限度保留原厂配置（SCM/SPMI/GDSC/UFS_PHY 等 defconfig 缺失的关键项）
+          cp ../stock_sdm845.config .config
+          make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- olddefconfig
+          # 关闭 SCM 自动后缀，保证可复现
           scripts/config --disable LOCALVERSION_AUTO || true
           # OnePlusOSS 公开树坑：BTFM_SLIM 默认随 MSM_BT_POWER 打开，但 <btfm_slim.h> 缺 include 路径，编不过。
           # 我们只要 Module.symvers 的 CRC，蓝牙驱动无关，直接关掉
