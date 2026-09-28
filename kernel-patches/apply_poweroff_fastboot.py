@@ -18,8 +18,8 @@ r1 = (
     "{\n"
     + T + "bool need_warm_reset = false;\n"
     + "/* LSD_DIAG */ extern int lsd_diag_fastboot;\n"
-    + T + "if (lsd_diag_fastboot)\n"
-    + T + T + "cmd = \"bootloader\";\n"
+    + T + "/* 不修改 cmd(保持 normal restart reason), 只强制热复位保 RAM,\n"
+    + T + " * 这样复位后 bootloader 自动启动当前槽(a 槽)第二次, 跳过死亡 initcall */\n"
 )
 if a1 not in t:
     sys.exit("anchor1 not found (already patched?)")
