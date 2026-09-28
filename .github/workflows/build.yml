@@ -321,6 +321,21 @@ jobs:
             LOCALVERSION="${{ inputs.localversion }}" modules
           modinfo kernel-patches/imem_reader/imem_reader.ko | grep -E 'vermagic|depends' || true
 
+      # 二分法辅助：导出 level 6(device) 全部 initcall 的有序列表（含 __initcall6s）。
+      # 拿到卡死 index 后可直接反查是哪个 initcall 函数。
+      - name: Dump device-level initcall list (bisect helper)
+        run: |
+          cd kernel
+          awk '$3=="__initcall6_start"{in6=1;next} $3=="__initcall7_start"{in6=0} in6&&$2~/^[tT]$/{print n++"\t"$3}' System.map > ../initcall6.txt
+          echo "level6 initcall total: $(wc -l < ../initcall6.txt)"
+          echo '--- last 5 ---'; tail -5 ../initcall6.txt
+
+      - name: Upload initcall6 list
+        uses: actions/upload-artifact@v4
+        with:
+          name: initcall6-list
+          path: initcall6.txt
+
       # 用 magiskboot 解包原厂 boot_b.img，只替换 kernel，ramdisk（含 Magisk）/dtb/cmdline 原样保留
       - name: Repack boot.img with new kernel
         run: |
