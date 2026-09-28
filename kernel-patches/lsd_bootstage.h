@@ -39,6 +39,9 @@ static inline void lsd_boot_stage(u32 code)
  * 定义在 early_crash_dump.c。 */
 void lsd_death_check(void);
 
+/* 内核走到 exec init 前调用：取消启动进度看门狗。定义在 early_crash_dump.c */
+void lsd_boot_ok(void);
+
 /* 临时无条件探针：跑到第一条C即 dump IMEM 并 panic。定义在 early_crash_dump.c */
 void lsd_probe(void);
 

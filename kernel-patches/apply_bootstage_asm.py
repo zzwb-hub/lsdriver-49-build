@@ -96,21 +96,8 @@ if old3 not in t:
     sys.exit("anchor3 not found")
 t = t.replace(old3, new3, 1)
 
-# 4) probe right before "b start_kernel" (MMU on, C callable). Determines
-# whether execution reaches the end of __primary_switched at all.
-old4 = (
-    T + "b\tstart_kernel\n"
-    + "ENDPROC(__primary_switched)\n"
-)
-new4 = (
-    T + "ldr_l\tx8, lsd_probe\n"
-    + T + "blr\tx8\n"
-    + T + "b\tstart_kernel\n"
-    + "ENDPROC(__primary_switched)\n"
-)
-if old4 not in t:
-    sys.exit("anchor4 not found")
-t = t.replace(old4, new4, 1)
+# 4) pre-start_kernel probe removed for the hang hunt (it panicked unconditionally).
+#    Keep head.S untouched at "b start_kernel".
 
 open(P, "w").write(t)
-print("head.S stages 10-15 + pre-start_kernel probe injected")
+print("head.S stages 10-15 injected (no pre-start_kernel probe)")

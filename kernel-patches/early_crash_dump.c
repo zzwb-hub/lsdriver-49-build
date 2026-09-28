@@ -20,6 +20,8 @@
 #include <linux/kernel.h>
 #include <linux/notifier.h>
 #include <linux/sched.h>
+#include <linux/timer.h>
+#include <linux/jiffies.h>
 #include <asm/memory.h>
 #include <asm/ptrace.h>
 #include <asm/cacheflush.h>
@@ -40,6 +42,41 @@ struct pram {
 	s32 size;
 	u8 data[0];
 };
+
+/* ---- boot progress deadline（抓"进度停滞型"静默卡死）----
+ * early_initcall 时布 20s 定时器；内核走到 exec init 前调 lsd_boot_ok 取消。
+ * 若在驱动初始化阶段挂起（关键线程睡眠/死亡、其余CPU在idle，定时器仍能跑），
+ * 到期即在软中断里 panic，走已验证的热复位(保RAM、保pstore)。
+ * 注意：不抓"关中断死循环"（那种定时器也不跑），那类留给硬件狗。 */
+#define LSD_BOOT_DEADLINE_MS	20000
+static struct timer_list lsd_boot_deadline;
+static int lsd_boot_reached_userspace;
+
+static void lsd_boot_deadline_fn(unsigned long data)
+{
+	if (!lsd_boot_reached_userspace)
+		panic("LSD: boot deadline %dms exceeded - progress stall during init",
+		      LSD_BOOT_DEADLINE_MS);
+}
+
+void lsd_boot_ok(void)
+{
+	lsd_boot_reached_userspace = 1;
+	smp_mb();
+	del_timer_sync(&lsd_boot_deadline);
+}
+
+static int __init lsd_arm_boot_deadline(void)
+{
+	init_timer(&lsd_boot_deadline);
+	lsd_boot_deadline.function = lsd_boot_deadline_fn;
+	lsd_boot_deadline.data = 0;
+	lsd_boot_deadline.expires =
+		jiffies + msecs_to_jiffies(LSD_BOOT_DEADLINE_MS);
+	add_timer(&lsd_boot_deadline);
+	return 0;
+}
+early_initcall(lsd_arm_boot_deadline);
 
 static long lsd_seen;
 

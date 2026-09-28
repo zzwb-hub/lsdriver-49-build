@@ -28,7 +28,7 @@ rep(
     "top include",
 )
 
-# unconditional probe FIRST (temporary), then death self-check, then stage 20
+# death self-check, then stage 20 (unconditional probe removed for hang hunt)
 rep(
     "asmlinkage __visible void __init start_kernel(void)\n"
     "{\n"
@@ -38,7 +38,6 @@ rep(
     "{\n"
     + T + "char *command_line;\n"
     + T + "char *after_dashes;\n\n"
-    + T + "lsd_probe();\n"
     + T + "lsd_death_check();\n"
     + T + "lsd_boot_stage(20);\n",
     "start_kernel head",
@@ -89,12 +88,14 @@ rep(
     "rest_init entry",
 )
 
-# 40 in kernel_init, right before executing userspace init
+# 40 in kernel_init, right before executing userspace init; reaching here means
+# all driver initcalls completed -> cancel the boot-progress deadline.
 rep(
     T + "rcu_end_inkernel_boot();\n\n"
     + T + "if (ramdisk_execute_command) {\n",
     T + "rcu_end_inkernel_boot();\n\n"
     + T + "lsd_boot_stage(40);\n"
+    + T + "lsd_boot_ok();\n"
     + T + "if (ramdisk_execute_command) {\n",
     "kernel_init stage 40",
 )
