@@ -252,6 +252,10 @@ jobs:
           scripts/config --disable MODULE_SIG_FORCE
           # 诊断用：关闭 panic 强制咬看门狗（硬复位会饿死 pstore 落盘），保证崩溃栈写入 ramoops
           scripts/config --disable QCOM_FORCE_WDOG_BITE_ON_PANIC
+          # 诊断用：打开屏幕 console（fbcon + MSM DRM fbdev 模拟），
+          # 配合 cmdline 的 console=tty0 把内核 log/panic 栈直接画在手机屏幕上
+          # （无串口、pstore 空、param 被原厂驱动独占时的唯一可见性）
+          scripts/config --enable FRAMEBUFFER_CONSOLE --enable DRM_FBDEV_EMULATION
           # 诊断用：抓"静默卡死"（屏幕停在橙色解锁警告、USB不通、无panic）。
           # 开启 soft/hard lockup 检测器并设为检测到即 panic —— panic 即走现有热复位链路，
           # RAM保住、自动进fastboot，console区留下卡死瞬间的最后日志与现场。
