@@ -2,6 +2,7 @@
 #define _EXPORT_FUN_H_
 #include <linux/errno.h>
 #include <linux/kernel.h>
+#include <linux/kallsyms.h> // 5.7 之前 generic_kallsyms_lookup_name 直接调用 kallsyms_lookup_name
 #include <linux/version.h>
 #include <linux/kprobes.h>
 #include <linux/types.h>
@@ -38,6 +39,18 @@
 // 屏蔽 CFI 检查，统一利用 kprobe 获取 kallsyms_lookup_name 地址
 __attribute__((no_sanitize("cfi"))) static unsigned long generic_kallsyms_lookup_name(const char *name)
 {
+#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 7, 0)
+    /*
+     * 5.7 之前 kallsyms_lookup_name 仍是导出符号，直接调用即可。
+     * 必须走这条路：4.9 的原厂内核常常没有开 CONFIG_KPROBES
+     * （本例 stock config 就是 # CONFIG_KPROBES is not set），
+     * 此时 linux/kprobes.h 里的 register_kprobe() 是 #else 分支的
+     * -ENOSYS 空桩（编译期内联，连符号都不会出现在 .ko 里），
+     * 于是下面 kprobe 路径恒返回 0，调用方拿到 NULL 解引用直接 panic
+     * （实测 hide_myself() 里 list_for_each_entry_safe(_vmap_area_list) 就是这么崩的）。
+     */
+    return kallsyms_lookup_name(name);
+#else
     unsigned long (*fn_kallsyms_lookup_name)(const char *name) = NULL;
     struct kprobe kp = {0};
 
@@ -52,6 +65,7 @@ __attribute__((no_sanitize("cfi"))) static unsigned long generic_kallsyms_lookup
     if (!fn_kallsyms_lookup_name) return 0;
 
     return fn_kallsyms_lookup_name(name);
+#endif
 }
 int (*fn_aarch64_insn_patch_text)(void *addrs[], uint32_t insts[], int cnt);
 
