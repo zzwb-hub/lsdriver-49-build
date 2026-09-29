@@ -31,6 +31,7 @@ rep(
     "int __init_or_module do_one_initcall(initcall_t fn)\n",
     "/* LSD_DIAG: initcall 二分法全局状态 */\n"
     "static int lsd_icount;\n"
+    "static int lsd_in_l6;\t/* 只在 level6(device) 内计数/跳过, 否则会误伤 levels 0-5 */\n"
     "static int lsd_icount_max = 99999;\n"
     "static int lsd_initcall_max_level = 99;\n"
     "static int __init lsd_set_initcall_max(char *str)\n"
@@ -83,15 +84,17 @@ rep(
     + T + "int ret;\n"
     + T + "char msgbuf[64];\n"
     + "\n"
-    + T + "if (lsd_icount >= lsd_icount_max) {\n"
+    + T + "if (lsd_in_l6) {\n"
+    + T + T + "if (lsd_icount >= lsd_icount_max) {\n"
+    + T + T + T + "lsd_icount++;\n"
+    + T + T + T + "return 0;\n"
+    + T + T + "}\n"
+    + T + T + "if (lsd_skip_hi >= 0 && lsd_icount >= lsd_skip_lo && lsd_icount < lsd_skip_hi) {\n"
+    + T + T + T + "lsd_icount++;\n"
+    + T + T + T + "return 0;\n"
+    + T + T + "}\n"
     + T + T + "lsd_icount++;\n"
-    + T + T + "return 0;\n"
     + T + "}\n"
-    + T + "if (lsd_skip_hi >= 0 && lsd_icount >= lsd_skip_lo && lsd_icount < lsd_skip_hi) {\n"
-    + T + T + "lsd_icount++;\n"
-    + T + T + "return 0;\n"
-    + T + "}\n"
-    + T + "lsd_icount++;\n"
     + "\n"
     + T + "if (initcall_blacklisted(fn))\n",
     "do_one_initcall guard",
@@ -116,12 +119,15 @@ rep(
     + T + "pr_emerg(\"LSD: initcall levels 0..%d count_max=%d\\n\",\n"
     + T + T + "max_level, lsd_icount_max);\n"
     + T + "for (level = 0; level <= max_level; level++) {\n"
-    # 固定在第 6 级(device)复位, 使 lsd_icount / lsd_skip_* 始终是 level6 相对 index;
-    # 若按 max_level 复位, max=7 时 index 会跨 level 累计(之前 flash85 跳错位置的原因)
-    + T + T + "if (level == 6)\n"
+    # 进入第 6 级(device)才开始计数/跳过; 若按 max_level 复位或全局计数,
+    # levels 0-5 会被误截断/误跳(历史结果错乱的根因)
+    + T + T + "if (level == 6) {\n"
     + T + T + T + "lsd_icount = 0;\n"
+    + T + T + T + "lsd_in_l6 = 1;\n"
+    + T + T + "}\n"
     + T + T + "do_initcall_level(level);\n"
     + T + "}\n"
+    + T + "lsd_in_l6 = 0;\n"
     + T + "pr_emerg(\"LSD: initcall bisect done\\n\");\n"
     "}\n",
     "do_initcalls level limit",
