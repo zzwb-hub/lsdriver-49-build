@@ -614,14 +614,26 @@ static void hide_myself(void)
     _vmap_area_list = (struct list_head *)generic_kallsyms_lookup_name("vmap_area_list");
     _vmap_area_root = (struct rb_root *)generic_kallsyms_lookup_name("vmap_area_root");
 
-    // 摘除vmalloc调用关系链，/proc/vmallocinfo中不可见
-    list_for_each_entry_safe(va, vtmp, _vmap_area_list, list)
+    /*
+    解析失败时必须跳过：list_for_each_entry_safe 会立刻解引用这个头结点，
+    拿到 NULL 就是"Unable to handle kernel NULL pointer dereference at virtual address 0"，
+    直接把 insmod 变成内核 panic（本机 4.9 原厂内核 CONFIG_KPROBES=n 曾实测如此）。
+    */
+    if (!_vmap_area_list || !_vmap_area_root)
     {
-        if ((uint64_t)THIS_MODULE > va->va_start && (uint64_t)THIS_MODULE < va->va_end)
+        ls_log_always_tag("core", "lookup vmap_area_list/vmap_area_root failed, skip vmap hide\n");
+    }
+    else
+    {
+        // 摘除vmalloc调用关系链，/proc/vmallocinfo中不可见
+        list_for_each_entry_safe(va, vtmp, _vmap_area_list, list)
         {
-            list_del(&va->list);
-            // rbtree中摘除，无法通过rbtree找到
-            rb_erase(&va->rb_node, _vmap_area_root);
+            if ((uint64_t)THIS_MODULE > va->va_start && (uint64_t)THIS_MODULE < va->va_end)
+            {
+                list_del(&va->list);
+                // rbtree中摘除，无法通过rbtree找到
+                rb_erase(&va->rb_node, _vmap_area_root);
+            }
         }
     }
 
