@@ -32,6 +32,8 @@
 #include <asm/ptrace.h>
 #include <asm/cacheflush.h>
 #include <linux/lsd_bootstage.h>
+#include <linux/kmsg_dump.h>
+#include <linux/string.h>
 
 #define LSD_CONSOLE_PHYS	0xAC440000UL
 #define LSD_CONSOLE_CAP		0x40000UL	/* 含12字节头 */
@@ -60,7 +62,7 @@ static int lsd_boot_reached_userspace;
 
 /* 前向声明: 定义在文件后部 param 写入器 */
 static void lsd_param_write_now(void);
-#define LSD_PARAM_SECTOR	16	/* offset 0x2000, 避开 BCB */
+#define LSD_PARAM_SECTOR	128	/* offset 0x10000, 避开原厂 param 记录表(RTC/CRASH_RECORD/SALEINFO... 在 0x0-0x3000) */
 #define LSD_PARAM_MAGIC		0x4C534450U	/* "LSDP" */
 struct lsd_param_rec;
 static void lsd_fill_record(struct lsd_param_rec *rec);
@@ -138,6 +140,48 @@ static int __init lsd_arm_boot_deadline(void)
 	return 0;
 }
 early_initcall(lsd_arm_boot_deadline);
+
+/* ---- 内核日志环形缓冲捕获 ----
+ * kthread 每 2s 触发一次 kmsg_dump, 下面的回调用滚动缓冲保留日志末尾;
+ * 记录随 param 分区一起落盘(偏移 0x10000), b 槽 dd 出来即可看到
+ * 卡死瞬间最后的 printk / 用户空间写入。 */
+#define LSD_LOG_RING	4096
+static char lsd_log_ring[LSD_LOG_RING];
+static size_t lsd_log_used;
+static int lsd_kgrab;
+
+static void lsd_kmsg_cb(struct kmsg_dumper *d, enum kmsg_dump_reason reason)
+{
+	char line[256];
+	size_t len;
+
+	(void)reason;
+	if (!lsd_kgrab)
+		return;
+
+	while (kmsg_dump_get_line(d, true, line, sizeof(line), &len)) {
+		if (!len)
+			continue;
+		if (len >= sizeof(lsd_log_ring)) {
+			memcpy(lsd_log_ring, line + len - sizeof(lsd_log_ring),
+			       sizeof(lsd_log_ring));
+			lsd_log_used = sizeof(lsd_log_ring);
+			continue;
+		}
+		if (lsd_log_used + len > sizeof(lsd_log_ring)) {
+			size_t drop = lsd_log_used + len - sizeof(lsd_log_ring);
+			memmove(lsd_log_ring, lsd_log_ring + drop,
+				lsd_log_used - drop);
+			lsd_log_used -= drop;
+		}
+		memcpy(lsd_log_ring + lsd_log_used, line, len);
+		lsd_log_used += len;
+	}
+}
+
+static struct kmsg_dumper lsd_kdumper = {
+	.dump = lsd_kmsg_cb,
+};
 
 static long lsd_seen;
 
@@ -291,6 +335,7 @@ static struct notifier_block lsd_nb = {
 
 static int __init lsd_early_init(void)
 {
+	kmsg_dump_register(&lsd_kdumper);
 	return atomic_notifier_chain_register(&panic_notifier_list, &lsd_nb);
 }
 pure_initcall(lsd_early_init);
@@ -311,7 +356,9 @@ struct lsd_param_rec {
 	u32 prev_stage;		/* 上次死亡 stage */
 	u32 prev_initcall_fn;	/* 上次卡死时正在执行的 initcall 函数指针 */
 	u32 cur_initcall_fn;	/* 当前正在执行的 initcall 函数指针 */
-	char last_console[256];
+	u32 log_len;
+	u32 pad;
+	char log[3800];		/* 内核日志末尾(滚动), b 槽 dd 出来定位卡死点 */
 };
 
 static struct block_device *lsd_param_bdev;
@@ -332,14 +379,17 @@ static void lsd_fill_record(struct lsd_param_rec *rec)
 	rec->prev_initcall_fn = lsd_prev_initcall_fn;
 	rec->cur_initcall_fn = *(u32 *)(imem + LSD_BS_INITCALL_FN_OFF);
 
-	/* 抓 ramoops console 区末尾(可能含上次 panic 记录) */
-	{
-		struct pram *pr = (struct pram *)__phys_to_virt(LSD_CONSOLE_PHYS);
-		if (pr->sig == DBGC && pr->size > 0 && pr->size < LSD_TXT_SZ) {
-			int copylen = pr->size < (s32)sizeof(rec->last_console)
-				      ? pr->size : (s32)sizeof(rec->last_console);
-			memcpy(rec->last_console, pr->data + pr->size - copylen, copylen);
-		}
+	/* 抓内核日志环形缓冲的末尾: 卡死前最后的 printk / 用户空间写入 */
+	lsd_log_used = 0;
+	lsd_kgrab = 1;
+	kmsg_dump(KMSG_DUMP_OOPS);
+	lsd_kgrab = 0;
+	if (lsd_log_used) {
+		u32 n = lsd_log_used < sizeof(rec->log)
+			? (u32)lsd_log_used : (u32)sizeof(rec->log) - 1;
+		memcpy(rec->log, lsd_log_ring, n);
+		rec->log[n] = 0;
+		rec->log_len = n;
 	}
 }
 
