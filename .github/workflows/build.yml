@@ -82,6 +82,49 @@ jobs:
           echo "KERNEL_CC=$GCC" >> "$GITHUB_ENV"
           echo "KERNEL_CROSS=$HOME/tc49/bin/aarch64-linux-android-" >> "$GITHUB_ENV"
 
+      # Q_10.0 公开树把一加厂商驱动整目录删了(drivers/oneplus, drivers/oem_debug,
+      # drivers/param_read_write)，导致相关 CONFIG 符号在 Kconfig 中根本不存在 →
+      # olddefconfig 静默丢弃 → 相关代码被裁掉 / 结构体字段未初始化
+      # （已知真 bug：task_struct->nn 的初始化被 #ifdef CONFIG_OPCHAIN 裁掉，
+      #   但使用无保护 → free_task 里 kfree 野指针 → Kernel BUG）。
+      # P_9.0(Pie) 分支公开树是完整的 → 现场从它取回这三套驱动与真实现。
+      - name: Graft OnePlus vendor drivers (taken from Pie branch)
+        run: |
+          git clone --depth 1 --branch oneplus/SDM845_P_9.0 \
+            https://github.com/OnePlusOSS/android_kernel_oneplus_sdm845.git "$HOME/kernel-pie"
+          rm -rf kernel/drivers/oneplus kernel/drivers/oem_debug kernel/drivers/param_read_write
+          cp -r "$HOME/kernel-pie/drivers/oneplus" kernel/drivers/oneplus
+          cp -r "$HOME/kernel-pie/drivers/oem_debug" kernel/drivers/oem_debug
+          cp -r "$HOME/kernel-pie/drivers/param_read_write" kernel/drivers/param_read_write
+          cd kernel
+          # coretech/ 源码不在 Q 公开树 → 不编入它，只补回 CONFIG_OPCHAIN 符号本身，
+          # 使 #ifdef CONFIG_OPCHAIN 的代码（含 fork.c 的 nn/utask_* 初始化）恢复原状；
+          # opchain 调用点由下面 Stub 步骤生成的 uxcore/opchain_helper.h 中性桩提供。
+          python3 -c '
+          p="drivers/oneplus/Kconfig"; t=open(p).read()
+          t=t.replace("source \"drivers/oneplus/coretech/Kconfig\"",
+          "config OPCHAIN\n\tdefault y\n\tbool \"Oneplus CoreTech opchain helper (symbol only; impl stubbed)\"")
+          open(p,"w").write(t)
+          p="drivers/oneplus/Makefile"; t=open(p).read()
+          t=t.replace("obj-y += coretech/", "")
+          open(p,"w").write(t)
+          print("coretech dropped; CONFIG_OPCHAIN symbol added")
+          '
+          # Q 树 drivers/Kconfig 只 source 了 drivers/oneplus，另两个要补
+          python3 -c '
+          p="drivers/Kconfig"; t=open(p).read()
+          if "drivers/oem_debug/Kconfig" not in t:
+              t=t.replace("source \"drivers/oneplus/Kconfig\"", "source \"drivers/oneplus/Kconfig\"\nsource \"drivers/oem_debug/Kconfig\"\nsource \"drivers/param_read_write/Kconfig\"", 1)
+              open(p,"w").write(t)
+              print("drivers/Kconfig wired")
+          p="drivers/Makefile"; t=open(p).read()
+          if "oem_debug/" not in t:
+              t += "\nobj-y += oem_debug/\nobj-y += param_read_write/\n"
+              open(p,"w").write(t)
+              print("drivers/Makefile wired")
+          '
+          ls -la drivers/oneplus drivers/oem_debug drivers/param_read_write
+
       # OnePlusOSS 公开树不完整：drivers/Kconfig 引用但缺失 drivers/oneplus/。
       # 通用兜底：把所有 Kconfig 里 source 了但文件不存在的路径补成空 Kconfig。
       - name: Stub missing vendor Kconfigs
@@ -90,9 +133,9 @@ jobs:
           mkdir -p drivers/oneplus
           [ -f drivers/oneplus/Kconfig ] || echo '# stub: OnePlusOSS 公开树未包含此目录' > drivers/oneplus/Kconfig
           # drivers/Makefile 无条件 obj-y += oneplus/，空 Makefile 不会生成 built-in.o 导致父链接失败，
-          # 用一个空 .c 产出空 built-in.o
-          echo 'obj-y += op_stub.o' > drivers/oneplus/Makefile
-          echo '/* empty stub */' > drivers/oneplus/op_stub.c
+          # 用一个空 .c 产出空 built-in.o（已移植真目录时保留其 Makefile）
+          [ -f drivers/oneplus/Makefile ] || echo 'obj-y += op_stub.o' > drivers/oneplus/Makefile
+          [ -f drivers/oneplus/op_stub.c ] || echo '/* empty stub */' > drivers/oneplus/op_stub.c
           grep -rhoP 'source\s+"\K[^"]+' --include=Kconfig . | sort -u | while read -r f; do
             case "$f" in *'$'*) continue;; esac
             if [ ! -f "$f" ]; then
