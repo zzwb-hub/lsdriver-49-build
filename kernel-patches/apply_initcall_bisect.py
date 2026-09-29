@@ -116,7 +116,9 @@ rep(
     + T + "pr_emerg(\"LSD: initcall levels 0..%d count_max=%d\\n\",\n"
     + T + T + "max_level, lsd_icount_max);\n"
     + T + "for (level = 0; level <= max_level; level++) {\n"
-    + T + T + "if (level == max_level)\n"
+    # 固定在第 6 级(device)复位, 使 lsd_icount / lsd_skip_* 始终是 level6 相对 index;
+    # 若按 max_level 复位, max=7 时 index 会跨 level 累计(之前 flash85 跳错位置的原因)
+    + T + T + "if (level == 6)\n"
     + T + T + T + "lsd_icount = 0;\n"
     + T + T + "do_initcall_level(level);\n"
     + T + "}\n"
