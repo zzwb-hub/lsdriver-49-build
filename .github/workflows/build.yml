@@ -22,6 +22,10 @@ name: build-lsdriver-4.9
         description: '二分法：在initcall_max指定的level内只跑前M个initcall。99999=全部'
         required: false
         default: '99999'
+      disable_configs:
+        description: '禁用指定CONFIG（裸名，逗号分隔，如 DIAG_CHAR,VSERVICES_SERIAL）。用于剔除崩溃驱动'
+        required: false
+        default: ''
 
 env:
   KERNEL_REPO: https://github.com/OnePlusOSS/android_kernel_oneplus_sdm845.git
@@ -260,6 +264,13 @@ jobs:
               --enable BOOTPARAM_HARDLOCKUP_PANIC \
               --enable PANIC_ON_RECURSIVE_FAULT \
               --enable INITCALL_DEBUG || true
+          fi
+          # 可选：禁用指定 CONFIG（裸名，逗号分隔），用于剔除崩溃驱动
+          if [ -n "${{ inputs.disable_configs }}" ]; then
+            for c in $(echo "${{ inputs.disable_configs }}" | tr ',' ' '); do
+              scripts/config --disable "$c" || true
+              echo "disabled: $c"
+            done
           fi
           make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- olddefconfig
           if grep -q '^# CONFIG_MODULE_SIG_FORCE is not set' .config; then echo "SIG_FORCE=off"; else echo "SIG_FORCE=STILL ON"; fi
