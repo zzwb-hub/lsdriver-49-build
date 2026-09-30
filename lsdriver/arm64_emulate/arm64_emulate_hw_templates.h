@@ -3,7 +3,11 @@
 
 #include <linux/types.h>
 
-#define ARM64_HW_TEMPLATE static __attribute__((__naked__, __noinline__, __unused__, __section__(".text.arm64_hw_templates")))
+/* __noclone__ 是必须的：模板用裸汇编把 ABI 写死（x0-x4 输入、x5 输出指针）。
+   若允许编译器做 IPA-CP 常量传播克隆（-O3 默认开 -fipa-cp-clone），被常量化的
+   参数会从 ABI 中消失、其余参数寄存器前移，而汇编仍写死 x5 -> 输出指针取到游离值
+   （实测 x5=0）-> 内核态写空指针 -> Kernel BUG。详见 工具网关\lsdriver接入说明.md */
+#define ARM64_HW_TEMPLATE static __attribute__((__naked__, __noinline__, __noclone__, __unused__, __section__(".text.arm64_hw_templates")))
 
 /*
 快速解释硬件汇编模板执行模型：

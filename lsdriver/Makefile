@@ -30,16 +30,26 @@ $(obj)/lsdriver_main.o: $(src)/lsdriver.c FORCE
 CFLAGS_lsdriver_main.o += -Wno-error
 
 # 【原厂内核 ABI 对齐】强制模块按"设备原厂 stock 内核"的结构体布局编译。
-# 背景：OnePlusOSS 公开树 Kconfig 里没有 ADJ_CHAIN / MEMPLUS / SMART_BOOST，
-# olddefconfig 会把 stock_sdm845.config 里的 =y 静默丢弃 → 本树编出的模块看到的
-# task_struct / signal_struct / vm_area_struct / lruvec / 页标志偏移都比原厂内核少一段
-# （ADJ_CHAIN 差 24 字节），运行时按错偏移写 task 字段 → 整机卡死。
-# 这里只给本模块打开这 3 个符号，让头文件里的结构体成员块生效，模块侧 ABI 与原厂内核一致；
-# 内核侧（vmlinux / Module.symvers）不动，因为最终跑的是原厂内核，不是本树编的内核。
+# 背景：OnePlusOSS 公开树的 Kconfig 里没有 ADJ_CHAIN / MEMPLUS / SMART_BOOST，
+# olddefconfig 会把 stock_sdm845.config 里的 =y 静默丢弃，于是本树编译出的模块
+# 看到的 task_struct / signal_struct / vm_area_struct / lruvec / 页标志偏移
+# 都比原厂内核少一段（ADJ_CHAIN 24 字节等），运行时按错偏移写 task 字段 →
+# 整机卡死。这里只给本模块打开这 3 个符号，让头文件里的结构体成员块生效，
+# 模块侧 ABI 与原厂内核一致；内核侧（vmlinux/Module.symvers）不动，
+# 因为最终运行的是原厂内核，不是本树编的内核。
 ccflags-y += -DCONFIG_ADJ_CHAIN -DCONFIG_MEMPLUS -DCONFIG_SMART_BOOST
 
 #O3优化:启用更积极的内联、循环变换、指令调度和常量传播。
 ccflags-y += -O3
+
+# 【4.9 分支】禁止 IPA-CP 常量传播克隆。
+# arm64_emulate 的硬件模板用裸汇编把 ABI 写死（x0-x4 输入、x5 输出指针），
+# 而 -O3 默认开启的 -fipa-cp-clone 会把"调用点恒为字面量"的参数常量掉，
+# 生成 .constprop.N 克隆（实测 ko 里有 1599 个，如 movz_w64.constprop.0、
+# clrex_0.constprop.0），克隆的 ABI 寄存器位置前移，汇编仍写死 x5 ->
+# 输出指针取到游离值（实测 x5=0）-> 内核态写空指针 -> Kernel BUG -> 整机重启。
+# 这是硬件断点一命中就崩机的根因。模板宏已加 __noclone__，此处再全局兜底。
+ccflags-y += -fno-ipa-cp-clone
 
 # Full LTO：让主驱动与 decoder/encoder 在统一模块视图中进行跨文件内联和常量传播。
 # 【4.9 分支】禁用：外部模块最终经 ld -r 重定位链接，GCC slim LTO 对象无链接器插件无法参与 -r 链接；
