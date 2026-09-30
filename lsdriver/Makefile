@@ -29,6 +29,15 @@ $(obj)/lsdriver_main.o: $(src)/lsdriver.c FORCE
 # ccflags-y 里的 -Wno-error 因顺序靠前压不住；per-file 标志在命令行最末尾，确保生效
 CFLAGS_lsdriver_main.o += -Wno-error
 
+# 【原厂内核 ABI 对齐】强制模块按"设备原厂 stock 内核"的结构体布局编译。
+# 背景：OnePlusOSS 公开树 Kconfig 里没有 ADJ_CHAIN / MEMPLUS / SMART_BOOST，
+# olddefconfig 会把 stock_sdm845.config 里的 =y 静默丢弃 → 本树编出的模块看到的
+# task_struct / signal_struct / vm_area_struct / lruvec / 页标志偏移都比原厂内核少一段
+# （ADJ_CHAIN 差 24 字节），运行时按错偏移写 task 字段 → 整机卡死。
+# 这里只给本模块打开这 3 个符号，让头文件里的结构体成员块生效，模块侧 ABI 与原厂内核一致；
+# 内核侧（vmlinux / Module.symvers）不动，因为最终跑的是原厂内核，不是本树编的内核。
+ccflags-y += -DCONFIG_ADJ_CHAIN -DCONFIG_MEMPLUS -DCONFIG_SMART_BOOST
+
 #O3优化:启用更积极的内联、循环变换、指令调度和常量传播。
 ccflags-y += -O3
 
