@@ -661,9 +661,78 @@ static void hide_myself(void)
     // }
 }
 
+/*
+★★ 幂等自检：本 boot 是否已经加载过 lsdriver（2026-10-01 新增）
+
+【为什么需要】hide_myself() 里 list_del_init(&THIS_MODULE->list) 把模块从内核链表摘掉
+（为了在 /proc/modules、lsmod 里隐身），副作用是内核的 -EEXIST 幂等保护失效：
+链表里找不到同名模块 ⇒ 第二次 insmod 被当成"全新实例"加载 ⇒ 再次往同一批内核函数
+入口写跳转（第一次的跳转会被当成"原始指令"保存）⇒ 两套 trampoline 互相踩 ⇒ 跳野地址。
+实测：同一地址的 "Unable to handle kernel paging request" 33ms 内刷约 889 条，随后整机重启。
+
+【本函数做什么】在任何副作用发生之前，先看几个"一定会被我们 hook 的函数"入口，
+是否已经是本框架的跳转特征（word0=0x58000050 / word1=0xd65f0200，见 inline_hook_frame.h）。
+命中 ⇒ 返回命中数 ⇒ 调用方直接拒绝加载（-EBUSY），一个字节都不写。
+
+【判据选择】这 4 个函数覆盖了 init 里会打桩的绝大多数目标：
+  do_group_exit / do_exit / taskstats_exit （do_exit_init 装的）
+  filldir64                                （进程/目录隐藏用的）
+即使将来只命中其中一个，也足以判定"本 boot 已加载过"。
+
+【留白】1) 判据是通用绝对跳转编码，别的框架用了同样编码会误拒（fail-safe，可接受）。
+        2) 若某个目标函数名在当前内核不存在（kallsyms 查不到），该条自动跳过；
+           理论上存在"全部查不到 ⇒ 判不出重复"的极端情况，那时仍有
+           hook_entry_install() 里的单条护栏兜底。
+*/
+static int already_loaded_check(void)
+{
+    static const char *known_syms[] = {
+        "do_group_exit",
+        "do_exit",
+        "taskstats_exit",
+        "filldir64",
+    };
+    int hits = 0;
+    int i;
+
+    for (i = 0; i < (int)ARRAY_SIZE(known_syms); i++)
+    {
+        uint64_t addr = generic_kallsyms_lookup_name(known_syms[i]);
+        if (!addr) continue;
+
+        if (looks_like_our_hook(addr))
+        {
+            hits++;
+            ls_log_always_tag("core", "idempotent-check: %s @0x%llx 已是本框架跳转 (%08x %08x)\n",
+                              known_syms[i], addr,
+                              *(volatile uint32_t *)addr,
+                              *(volatile uint32_t *)(addr + 4));
+        }
+    }
+    return hits;
+}
+
 static int __init lsdriver_init(void)
 {
     //*(volatile int *)0 = 0;
+
+    /*
+    ★★ 幂等自检必须放在【最前面】：insmod 时若发现本 boot 已加载过，直接拒绝加载。
+    为什么不能靠内核：hide_myself() 摘了模块链表 ⇒ 内核的 -EEXIST 保护失效（详见函数注释）。
+    为什么不能靠"先探测再 insmod"的外部脚本：那只在有人记得跑脚本时有效；
+    这里做在驱动内部，才是"内核自己拒"，纪律不再依赖人。
+    */
+    {
+        int hits = already_loaded_check();
+        if (hits > 0)
+        {
+            ls_log_always_tag("core", "★ 拒绝重复加载：本 boot 已加载过 lsdriver（%d 处 hook 特征命中）\n", hits);
+            ls_log_always_tag("core", "  原因: hide_myself() 摘除了模块链表，内核 -EEXIST 保护失效；\n");
+            ls_log_always_tag("core", "        重复加载会把跳转再插一遍 → 跳野地址 → 崩机。\n");
+            ls_log_always_tag("core", "  处置: 要重新加载请先重启手机（驱动不可 rmmod，重启是唯一干净的复原手段）。\n");
+            return -EBUSY;
+        }
+    }
 
     // print_el2_status(); // 输出Hypervisor相关信息
 

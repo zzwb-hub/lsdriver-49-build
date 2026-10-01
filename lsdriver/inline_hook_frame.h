@@ -74,6 +74,40 @@ asm(".pushsection .text\n\t"
                                                      ".endr\n\t"
                                                      ".popsection\n\t");
 
+/*
+★ 幂等护栏：判断某个内核函数入口【是否已经是本框架写的跳转】（2026-10-01 新增）
+
+【为什么必须要有】lsdriver 的 hide_myself() 会 list_del_init(&THIS_MODULE->list)
+把自己从内核模块链表摘掉（为了在 /proc/modules、lsmod 里隐身）。
+副作用是内核的【-EEXIST 幂等保护】跟着失效 —— load_module() 正是靠遍历那条链表
+发现同名模块并拒绝加载的。链表被摘 ⇒ find_module("lsdriver") 返回 NULL
+⇒ 第二次 insmod 被当成"全新实例"装进来 ⇒ 它再次往同一批内核函数入口写跳转
+（而第一次写的跳转会被 hook_save_orig_insts() 当成"原始指令"存下来）
+⇒ 两套 trampoline / .bss / 调试寄存器互相踩 ⇒ 跳到野地址。
+实测后果：同一地址的 "Unable to handle kernel paging request" 在 33ms 内刷约 889 条，
+随后整机重启，连 pstore 都来不及写。⇒ 必须把"第二次加载"从"崩机"变成"拒绝加载"。
+
+【判据】arm64_emit_abs_jump() 产生的绝对跳转是固定的 4 个字：
+    word0 = 0x58000050   ldr x16, #8
+    word1 = 0xd65f0200   br  x16
+    word2/word3          trampoline 的 64 位地址
+这里只比对前两个字（后两个字每次加载的 trampoline 地址都不同，没法比）。
+
+【留白】这是通用绝对跳转编码，理论上别的 hook 框架也可能用同样编码打在同一个函数上
+⇒ 那种情况我们会"误拒"。属于 fail-safe（宁可拒加载，也不要崩内核），可接受。
+另：本框架原本就处理过"目标入口已被别人 hook"的类似问题（见上方 kprobe BRK #4 说明），
+本条是它同一族问题的另一个来源。
+*/
+#define LSR_HOOK_JUMP_W0 0x58000050u /* ldr x16, #8 */
+#define LSR_HOOK_JUMP_W1 0xd65f0200u /* br  x16    */
+
+static inline bool looks_like_our_hook(uint64_t addr)
+{
+    if (!addr) return false;
+    return (*(volatile uint32_t *)addr == LSR_HOOK_JUMP_W0) &&
+           (*(volatile uint32_t *)(addr + 4) == LSR_HOOK_JUMP_W1);
+}
+
 // 一条 hook 的描述
 struct hook_entry
 {
@@ -477,6 +511,19 @@ static int hook_entry_install(struct hook_entry *e)
         }
     }
     if (!e->target_addr || !e->work_fn) return -EINVAL;
+
+    // ★ 幂等护栏（2026-10-01）：入口已经是本框架的跳转 ⇒ 拒绝重复安装。
+    //   否则会把第一次写下的跳转当成"原始指令"保存并回放，跳进野地址。
+    //   这是模块级自检（lsdriver_init 里的 already_loaded_check）之外的第二道防线：
+    //   即使模块级检查被绕过，单条 hook 也不会被重复打桩。
+    if (looks_like_our_hook(e->target_addr))
+    {
+        ls_log_always_tag("hook", "refuse re-hook %s @0x%llx: 入口已是本框架跳转(%08x %08x)\n",
+                          e->target_sym ? e->target_sym : "<addr>", e->target_addr,
+                          *(volatile uint32_t *)e->target_addr,
+                          *(volatile uint32_t *)(e->target_addr + 4));
+        return -EBUSY;
+    }
 
     // 保存入口即将被覆盖的原始指令。
     hook_save_orig_insts(e->target_addr, e->saved_inst, HOOK_STUB_WORDS);
